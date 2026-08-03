@@ -1,0 +1,7 @@
+<resources>
+    <style name="Theme.ClinicCollections" parent="android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:colorAccent">@color/brand_green</item>
+        <item name="android:windowBackground">@color/window_background</item>
+        <item name="android:statusBarColor">@color/brand_green</item>
+    </style>
+</resources>
