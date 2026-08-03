@@ -35,7 +35,7 @@ class BusinessLogicTest {
         val row = invoice(dueDate = today.minusDays(1))
         assertEquals(PaymentStatus.OVERDUE, row.computedStatus(today))
         assertEquals(PaymentStatus.PAID, row.copy(actualPaymentDate = today).computedStatus(today))
-        assertEquals(PaymentStatus.PENDING, row.copy(dueDate = today.plusDays(3)).computedStatus(today))
+        assertEquals(PaymentStatus.PENDING, row.copy(collectionDate = today.plusDays(3)).computedStatus(today))
     }
 
     @Test
