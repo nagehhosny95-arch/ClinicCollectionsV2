@@ -92,6 +92,8 @@ class BusinessLogicTest {
         assertEquals("971501234567", normalizePhone("+971 50 123 4567"))
         assertEquals("971501234567", normalizePhone("00971501234567"))
         assertEquals("971501234567", normalizePhone("971-50-123-4567"))
+        assertEquals("971501234567", normalizePhone("0501234567"))
+        assertEquals("971501234567", normalizePhone("501234567"))
     }
 
     @Test
@@ -101,6 +103,12 @@ class BusinessLogicTest {
         assertEquals("08/003", invoiceSuffix("INV/2026/08/003"))
         assertEquals(true, validInvoiceSuffix("08/003"))
         assertEquals(false, validInvoiceSuffix("8/3"))
+        assertEquals(true, validInvoiceSuffix("08/3"))
+        assertEquals(true, validInvoiceSuffix("12/1234"))
+        assertEquals(false, validInvoiceSuffix("13/1"))
+        assertEquals("08/3", formatInvoiceSuffixInput("083"))
+        assertEquals("08/", formatInvoiceSuffixInput("08"))
+        assertEquals("12/1234", formatInvoiceSuffixInput("121234"))
     }
 
     @Test

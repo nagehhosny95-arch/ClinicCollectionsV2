@@ -9,6 +9,7 @@ import android.os.Build
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -28,9 +29,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.nageh.cliniccollections.data.*
 import com.nageh.cliniccollections.reminders.ReminderScheduler
@@ -52,70 +55,75 @@ private val DisplayDate: DateTimeFormatter = DateTimeFormatter.ofPattern("dd/MM/
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val dao = AppDatabase.get(applicationContext).invoiceDao()
+        val database = AppDatabase.get(applicationContext)
         setContent {
-            MaterialTheme(
+            CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) { MaterialTheme(
                 colorScheme = lightColorScheme(
                     primary = BrandGreen,
                     secondary = DeepGreen,
                     surfaceVariant = Color(0xFFF1F5F3),
                     background = Color(0xFFF7FAF8)
                 )
-            ) { App(dao) }
+            ) { App(database.invoiceDao(), database.clinicDao()) } }
         }
     }
 }
 
 sealed interface Screen {
     data object List : Screen
-    data class Form(val id: Long? = null) : Screen
+    data class Form(val id: Long? = null, val clinicId: Long? = null) : Screen
     data object Report : Screen
     data object About : Screen
+    data object Clinics : Screen
+    data class ClinicDetail(val id: Long) : Screen
     data class Detail(val id: Long) : Screen
 }
 
 @Composable
-fun App(dao: InvoiceDao) {
+fun App(dao: InvoiceDao, clinicDao: ClinicDao) {
     var screen by remember { mutableStateOf<Screen>(Screen.List) }
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
     LaunchedEffect(Unit) {
         if (Build.VERSION.SDK_INT >= 33) launcher.launch(Manifest.permission.POST_NOTIFICATIONS)
     }
+    BackHandler(enabled = screen != Screen.List) { screen = Screen.List }
     when (val current = screen) {
-        Screen.List -> InvoiceList(dao, { screen = Screen.Detail(it) }, { screen = Screen.Form() }, { screen = Screen.Report }, { screen = Screen.About })
-        is Screen.Form -> InvoiceForm(dao, current.id) { screen = Screen.List }
+        Screen.List -> InvoiceList(dao, { screen = Screen.Detail(it) }, { screen = Screen.Form() }, { screen = Screen.Report }, { screen = Screen.About }, { screen = Screen.Clinics })
+        is Screen.Form -> InvoiceForm(dao, clinicDao, current.id, current.clinicId) { screen = Screen.List }
         Screen.Report -> ReportScreen(dao) { screen = Screen.List }
         Screen.About -> AboutScreen { screen = Screen.List }
+        Screen.Clinics -> ClinicsScreen(clinicDao, { screen = Screen.List }) { screen = Screen.ClinicDetail(it) }
+        is Screen.ClinicDetail -> ClinicDetailScreen(dao, clinicDao, current.id, { screen = Screen.Clinics }) { screen = Screen.Form(clinicId = current.id) }
         is Screen.Detail -> DetailScreen(dao, current.id, { screen = Screen.List }, { screen = Screen.Form(current.id) })
     }
 }
 
-private enum class CollectionState { PAID, TODAY, OVERDUE, UPCOMING }
+private enum class CollectionState { PAID, NORMAL, COLLECTION_DUE, PAYMENT_OVERDUE }
 
 private fun collectionState(invoice: InvoiceEntity, today: LocalDate = LocalDate.now()): CollectionState = when {
     invoice.computedStatus(today) == PaymentStatus.PAID -> CollectionState.PAID
-    invoice.collectionDate.isBefore(today) -> CollectionState.OVERDUE
-    invoice.collectionDate == today -> CollectionState.TODAY
-    else -> CollectionState.UPCOMING
+    invoice.dueDate.isBefore(today) -> CollectionState.PAYMENT_OVERDUE
+    !invoice.collectionDate.isAfter(today) -> CollectionState.COLLECTION_DUE
+    else -> CollectionState.NORMAL
 }
 
 private fun stateLabel(state: CollectionState) = when (state) {
     CollectionState.PAID -> "Paid"
-    CollectionState.TODAY -> "Collection Today"
-    CollectionState.OVERDUE -> "Collection Overdue"
-    CollectionState.UPCOMING -> "Upcoming"
+    CollectionState.NORMAL -> "On Track"
+    CollectionState.COLLECTION_DUE -> "Collection Due"
+    CollectionState.PAYMENT_OVERDUE -> "Payment Overdue"
 }
 
 private fun stateColor(state: CollectionState) = when (state) {
     CollectionState.PAID -> SoftGreen
-    CollectionState.TODAY -> SoftOrange
-    CollectionState.OVERDUE -> SoftRed
-    CollectionState.UPCOMING -> SoftBlue
+    CollectionState.NORMAL -> SoftGreen
+    CollectionState.COLLECTION_DUE -> SoftOrange
+    CollectionState.PAYMENT_OVERDUE -> SoftRed
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun InvoiceList(dao: InvoiceDao, onOpen: (Long) -> Unit, onAdd: () -> Unit, onReport: () -> Unit, onAbout: () -> Unit) {
+fun InvoiceList(dao: InvoiceDao, onOpen: (Long) -> Unit, onAdd: () -> Unit, onReport: () -> Unit, onAbout: () -> Unit, onClinics: () -> Unit) {
     var query by remember { mutableStateOf("") }
     val flow = remember(query) { if (query.isBlank()) dao.observeAll() else dao.search(normalizeSearchQuery(query)) }
     val rows by flow.collectAsStateWithLifecycle(emptyList())
@@ -128,6 +136,7 @@ fun InvoiceList(dao: InvoiceDao, onOpen: (Long) -> Unit, onAdd: () -> Unit, onRe
             TopAppBar(
                 title = { Column { Text("Clinic Collections", fontWeight = FontWeight.Bold); Text("Smart collection tracker", style = MaterialTheme.typography.labelMedium) } },
                 actions = {
+                    IconButton(onClick = onClinics) { Icon(Icons.Default.LocalHospital, "Clinics") }
                     IconButton(onClick = onReport) { Icon(Icons.Default.BarChart, "Reports") }
                     IconButton(onClick = onAbout) { Icon(Icons.Default.Info, "About") }
                 },
@@ -151,7 +160,7 @@ fun InvoiceList(dao: InvoiceDao, onOpen: (Long) -> Unit, onAdd: () -> Unit, onRe
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         SummaryCard("Outstanding", "AED ${money(totals.totalOutstandingMinor)}", Modifier.weight(1f))
-                        SummaryCard("Today / Overdue", "${dashboardRows.count { collectionState(it, today) == CollectionState.TODAY }} / ${dashboardRows.count { collectionState(it, today) == CollectionState.OVERDUE }}", Modifier.weight(1f))
+                        SummaryCard("Collect / Payment late", "${dashboardRows.count { collectionState(it, today) == CollectionState.COLLECTION_DUE }} / ${dashboardRows.count { collectionState(it, today) == CollectionState.PAYMENT_OVERDUE }}", Modifier.weight(1f))
                     }
                 }
             }
@@ -223,7 +232,7 @@ private fun EmptyState(title: String, message: String) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun InvoiceForm(dao: InvoiceDao, invoiceId: Long?, onDone: () -> Unit) {
+fun InvoiceForm(dao: InvoiceDao, clinicDao: ClinicDao, invoiceId: Long?, presetClinicId: Long?, onDone: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var original by remember { mutableStateOf<InvoiceEntity?>(null) }
@@ -233,13 +242,20 @@ fun InvoiceForm(dao: InvoiceDao, invoiceId: Long?, onDone: () -> Unit) {
     var due by remember { mutableStateOf<LocalDate?>(null) }; var collection by remember { mutableStateOf<LocalDate?>(null) }
     var paidDate by remember { mutableStateOf<LocalDate?>(null) }; var collected by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }; var saving by remember { mutableStateOf(false) }
+    var selectedClinicId by remember { mutableStateOf<Long?>(presetClinicId) }
+    val savedClinics by clinicDao.observeAll().collectAsStateWithLifecycle(emptyList())
+    val clinicMatches = remember(clinic, savedClinics) {
+        if (clinic.trim().length < 2) emptyList()
+        else savedClinics.filter { it.name.contains(clinic.trim(), ignoreCase = true) && !it.name.equals(clinic.trim(), ignoreCase = true) }.take(6)
+    }
 
-    LaunchedEffect(invoiceId) {
+    LaunchedEffect(invoiceId, presetClinicId) {
         if (invoiceId != null) dao.get(invoiceId)?.let { item ->
             original = item; clinic = item.clinicName; phone = item.whatsappNumber; suffix = invoiceSuffix(item.invoiceNumber)
+            selectedClinicId = item.clinicId
             amount = money(item.dueAmountMinor).replace(",", ""); due = item.dueDate; collection = item.collectionDate
             paidDate = item.actualPaymentDate; collected = if (item.collectedAmountMinor > 0) money(item.collectedAmountMinor).replace(",", "") else ""
-        }
+        } else if (presetClinicId != null) clinicDao.get(presetClinicId)?.let { saved -> clinic = saved.name; phone = saved.whatsappNumber; selectedClinicId = saved.id }
         loaded = true
     }
 
@@ -247,16 +263,26 @@ fun InvoiceForm(dao: InvoiceDao, invoiceId: Long?, onDone: () -> Unit) {
         if (!loaded) Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
         else Column(Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             SectionTitle("Clinic details")
-            Field(clinic, { clinic = it }, "Clinic name")
+            Field(clinic, { clinic = it; selectedClinicId = null }, "Clinic name")
+            if (clinicMatches.isNotEmpty()) {
+                Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = SoftBlue)) {
+                    Column { clinicMatches.forEach { saved ->
+                        Row(
+                            Modifier.fillMaxWidth().clickable { clinic = saved.name; phone = saved.whatsappNumber; selectedClinicId = saved.id }.padding(12.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) { Text(saved.name, fontWeight = FontWeight.SemiBold); Text(saved.whatsappNumber, style = MaterialTheme.typography.bodySmall) }
+                    } }
+                }
+            }
             Field(phone, { phone = it }, "WhatsApp number", KeyboardType.Phone)
             SectionTitle("Invoice details")
             OutlinedTextField(
                 value = suffix,
-                onValueChange = { suffix = invoiceSuffix(it).filter { ch -> ch.isDigit() || ch == '/' }.take(7) },
+                onValueChange = { suffix = formatInvoiceSuffixInput(it) },
                 modifier = Modifier.fillMaxWidth(),
                 label = { Text("Invoice number") },
                 prefix = { Text(INVOICE_PREFIX, fontWeight = FontWeight.Bold) },
-                supportingText = { Text("Enter only month and sequence, e.g. 08/003") },
+                supportingText = { Text("Month then 1–4 digits, e.g. 08/3 or 12/1234") },
                 singleLine = true
             )
             Field(amount, { amount = it }, "Due amount (AED)", KeyboardType.Decimal)
@@ -277,7 +303,9 @@ fun InvoiceForm(dao: InvoiceDao, invoiceId: Long?, onDone: () -> Unit) {
                             val fullNumber = fullInvoiceNumber(suffix)
                             if (fullNumber != original?.invoiceNumber && dao.countByInvoiceNumber(fullNumber) > 0) error = "Invoice $fullNumber already exists."
                             else {
+                                val savedClinicId = clinicDao.save(ClinicEntity(id = selectedClinicId ?: 0, name = clinic.trim(), whatsappNumber = normalizePhone(phone)))
                                 val item = (original ?: InvoiceEntity(clinicName = "", whatsappNumber = "", invoiceNumber = "", dueAmountMinor = 0, dueDate = due!!, collectionDate = collection!!)).copy(
+                                    clinicId = savedClinicId,
                                     clinicName = clinic.trim(), whatsappNumber = normalizePhone(phone), invoiceNumber = fullNumber,
                                     dueAmountMinor = parseMoney(amount), dueDate = due!!, collectionDate = collection!!,
                                     actualPaymentDate = paidDate, collectedAmountMinor = collected.takeIf { it.isNotBlank() }?.let(::parseMoney) ?: 0L,
@@ -361,6 +389,102 @@ fun ReportScreen(dao: InvoiceDao, onBack: () -> Unit) {
 }
 
 @Composable private fun ReportMetric(label: String, value: String) { Card(Modifier.fillMaxWidth().padding(vertical = 4.dp), colors = CardDefaults.cardColors(containerColor = Color.White)) { Row(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.SpaceBetween) { Text(label); Text(value, fontWeight = FontWeight.Bold, color = DeepGreen) } } }
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ClinicsScreen(clinicDao: ClinicDao, onBack: () -> Unit, onOpen: (Long) -> Unit) {
+    val clinics by clinicDao.observeAll().collectAsStateWithLifecycle(emptyList())
+    val scope = rememberCoroutineScope()
+    var name by remember { mutableStateOf("") }
+    var phone by remember { mutableStateOf("") }
+    var error by remember { mutableStateOf<String?>(null) }
+    var deleteTarget by remember { mutableStateOf<ClinicEntity?>(null) }
+
+    Scaffold(topBar = { TopAppBar(title = { Text("Clinic directory") }, navigationIcon = { IconButton(onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") } }) }) { padding ->
+        LazyColumn(
+            Modifier.fillMaxSize().padding(padding),
+            contentPadding = PaddingValues(16.dp, 16.dp, 16.dp, 60.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            item {
+                Card(colors = CardDefaults.cardColors(containerColor = SoftGreen)) {
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        SectionTitle("Register a clinic")
+                        Text("Save clinic details now, then select it quickly when adding an invoice.", style = MaterialTheme.typography.bodySmall)
+                        Field(name, { name = it }, "Clinic name")
+                        Field(phone, { phone = it }, "WhatsApp number", KeyboardType.Phone)
+                        error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                        Button(
+                            onClick = {
+                                val normalized = normalizePhone(phone)
+                                if (name.isBlank()) error = "Clinic name is required."
+                                else if (normalized.length < 11) error = "Enter a valid UAE mobile number."
+                                else scope.launch { clinicDao.save(ClinicEntity(name = name.trim(), whatsappNumber = normalized)); name = ""; phone = ""; error = null }
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) { Icon(Icons.Default.Save, null); Spacer(Modifier.width(8.dp)); Text("Save clinic") }
+                    }
+                }
+            }
+            item { Text("Saved clinics (${clinics.size})", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold) }
+            if (clinics.isEmpty()) item { EmptyState("No saved clinics", "Register clinics here whenever you have time.") }
+            items(clinics, key = { it.id }) { clinic ->
+                Card(Modifier.fillMaxWidth().clickable { onOpen(clinic.id) }, colors = CardDefaults.cardColors(containerColor = Color.White)) {
+                    Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.LocalHospital, null, tint = BrandGreen)
+                        Column(Modifier.weight(1f).padding(horizontal = 12.dp)) { Text(clinic.name, fontWeight = FontWeight.Bold); Text(clinic.whatsappNumber, style = MaterialTheme.typography.bodySmall) }
+                        IconButton({ name = clinic.name; phone = clinic.whatsappNumber }) { Icon(Icons.Default.Edit, "Edit") }
+                        IconButton({ deleteTarget = clinic }) { Icon(Icons.Default.Delete, "Delete") }
+                    }
+                }
+            }
+            item { Footer() }
+        }
+    }
+    deleteTarget?.let { clinic ->
+        AlertDialog(
+            onDismissRequest = { deleteTarget = null },
+            title = { Text("Delete clinic?") },
+            text = { Text("Invoices already saved for ${clinic.name} will not be deleted.") },
+            confirmButton = { TextButton({ scope.launch { clinicDao.delete(clinic); deleteTarget = null } }) { Text("Delete", color = MaterialTheme.colorScheme.error) } },
+            dismissButton = { TextButton({ deleteTarget = null }) { Text("Cancel") } }
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ClinicDetailScreen(dao: InvoiceDao, clinicDao: ClinicDao, clinicId: Long, onBack: () -> Unit, onAddInvoice: () -> Unit) {
+    val clinic by remember(clinicId) { clinicDao.observe(clinicId) }.collectAsStateWithLifecycle(null)
+    val invoices by remember(clinicId) { dao.observeForClinic(clinicId) }.collectAsStateWithLifecycle(emptyList())
+    val totals = remember(invoices) { report(invoices) }
+    Scaffold(
+        topBar = { TopAppBar(title = { Text(clinic?.name ?: "Clinic") }, navigationIcon = { IconButton(onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") } }) },
+        floatingActionButton = { ExtendedFloatingActionButton(onClick = onAddInvoice, icon = { Icon(Icons.Default.Add, null) }, text = { Text("Add invoice") }) }
+    ) { padding ->
+        LazyColumn(
+            Modifier.fillMaxSize().padding(padding),
+            contentPadding = PaddingValues(16.dp, 16.dp, 16.dp, 100.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            item {
+                Card(colors = CardDefaults.cardColors(containerColor = SoftGreen)) {
+                    Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(clinic?.name ?: "", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                        Text(clinic?.whatsappNumber ?: "")
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("${invoices.size} invoice${if (invoices.size == 1) "" else "s"}")
+                            Text("Outstanding: AED ${money(totals.totalOutstandingMinor)}", fontWeight = FontWeight.Bold, color = DeepGreen)
+                        }
+                    }
+                }
+            }
+            if (invoices.isEmpty()) item { EmptyState("No invoices for this clinic", "Tap Add invoice; clinic name and WhatsApp will be filled automatically.") }
+            items(invoices, key = { it.id }) { invoice -> InvoiceCard(invoice) {} }
+            item { Footer() }
+        }
+    }
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable private fun AboutScreen(onBack: () -> Unit) { Scaffold(topBar = { TopAppBar(title = { Text("About") }, navigationIcon = { IconButton(onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") } }) }) { padding -> Column(Modifier.fillMaxSize().padding(padding).padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) { Icon(Icons.Default.AccountBalanceWallet, null, tint = BrandGreen, modifier = Modifier.size(64.dp)); Text("Clinic Collections", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold); Text("Offline payment collection manager"); Spacer(Modifier.height(28.dp)); Footer() } } }

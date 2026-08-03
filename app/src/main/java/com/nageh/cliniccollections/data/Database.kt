@@ -17,6 +17,7 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import androidx.room.TypeConverter
 import androidx.room.TypeConverters
+import androidx.room.Transaction
 import androidx.room.Update
 import kotlinx.coroutines.flow.Flow
 import java.time.LocalDate
@@ -41,11 +42,13 @@ class Converters {
         Index(value = ["invoiceNumber"], unique = true),
         Index("dueDate"),
         Index("collectionDate"),
-        Index("actualPaymentDate")
+        Index("actualPaymentDate"),
+        Index("clinicId")
     ]
 )
 data class InvoiceEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val clinicId: Long? = null,
     val clinicName: String,
     val whatsappNumber: String,
     val invoiceNumber: String,
@@ -61,10 +64,21 @@ data class InvoiceEntity(
 ) {
     fun computedStatus(today: LocalDate = LocalDate.now()): PaymentStatus = manualStatus ?: when {
         actualPaymentDate != null || collectedAmountMinor >= dueAmountMinor -> PaymentStatus.PAID
-        collectionDate.isBefore(today) -> PaymentStatus.OVERDUE
+        dueDate.isBefore(today) -> PaymentStatus.OVERDUE
         else -> PaymentStatus.PENDING
     }
 }
+
+@Entity(
+    tableName = "clinics",
+    indices = [Index(value = ["name"], unique = true)]
+)
+data class ClinicEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val name: String,
+    val whatsappNumber: String,
+    val createdAtEpochMillis: Long = System.currentTimeMillis()
+)
 
 data class MonthlyTotals(
     val totalDueMinor: Long,
@@ -83,6 +97,9 @@ interface InvoiceDao {
 
     @Query("SELECT * FROM invoices WHERE id = :id")
     fun observe(id: Long): Flow<InvoiceEntity?>
+
+    @Query("SELECT * FROM invoices WHERE clinicId = :clinicId ORDER BY collectionDate ASC")
+    fun observeForClinic(clinicId: Long): Flow<List<InvoiceEntity>>
 
     @Query("SELECT * FROM invoices WHERE id = :id")
     suspend fun get(id: Long): InvoiceEntity?
@@ -123,11 +140,48 @@ interface InvoiceDao {
     suspend fun delete(item: InvoiceEntity)
 }
 
-@Database(entities = [InvoiceEntity::class], version = 2, exportSchema = true)
+@Dao
+interface ClinicDao {
+    @Query("SELECT * FROM clinics ORDER BY name COLLATE NOCASE")
+    fun observeAll(): Flow<List<ClinicEntity>>
+
+    @Query("SELECT * FROM clinics WHERE id = :id")
+    fun observe(id: Long): Flow<ClinicEntity?>
+
+    @Query("SELECT * FROM clinics WHERE id = :id")
+    suspend fun get(id: Long): ClinicEntity?
+
+    @Query("SELECT * FROM clinics WHERE name = :name COLLATE NOCASE LIMIT 1")
+    suspend fun findByName(name: String): ClinicEntity?
+
+    @Query("SELECT * FROM clinics WHERE name LIKE '%' || :query || '%' COLLATE NOCASE ORDER BY name COLLATE NOCASE LIMIT 8")
+    fun suggestions(query: String): Flow<List<ClinicEntity>>
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insert(clinic: ClinicEntity): Long
+
+    @Update
+    suspend fun update(clinic: ClinicEntity)
+
+    @Transaction
+    suspend fun save(clinic: ClinicEntity): Long {
+        val existing = clinic.id.takeIf { it > 0 }?.let { get(it) } ?: findByName(clinic.name)
+        return if (existing != null) {
+            update(existing.copy(name = clinic.name, whatsappNumber = clinic.whatsappNumber))
+            existing.id
+        } else insert(clinic)
+    }
+
+    @Delete
+    suspend fun delete(clinic: ClinicEntity)
+}
+
+@Database(entities = [InvoiceEntity::class, ClinicEntity::class], version = 3, exportSchema = true)
 @TypeConverters(Converters::class)
 abstract class AppDatabase : RoomDatabase() {
 
     abstract fun invoiceDao(): InvoiceDao
+    abstract fun clinicDao(): ClinicDao
 
     companion object {
         @Volatile private var INSTANCE: AppDatabase? = null
@@ -140,12 +194,39 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """CREATE TABLE IF NOT EXISTS `clinics` (
+                        `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        `name` TEXT NOT NULL,
+                        `whatsappNumber` TEXT NOT NULL,
+                        `createdAtEpochMillis` INTEGER NOT NULL
+                    )""".trimIndent()
+                )
+                db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS `index_clinics_name` ON `clinics` (`name`)")
+                db.execSQL(
+                    """INSERT OR IGNORE INTO clinics (name, whatsappNumber, createdAtEpochMillis)
+                       SELECT clinicName, MAX(whatsappNumber), MIN(createdAtEpochMillis)
+                       FROM invoices GROUP BY clinicName""".trimIndent()
+                )
+                db.execSQL("ALTER TABLE invoices ADD COLUMN clinicId INTEGER")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_invoices_clinicId` ON `invoices` (`clinicId`)")
+                db.execSQL(
+                    """UPDATE invoices SET clinicId = (
+                        SELECT clinics.id FROM clinics
+                        WHERE clinics.name = invoices.clinicName COLLATE NOCASE LIMIT 1
+                    )""".trimIndent()
+                )
+            }
+        }
+
         fun get(context: Context): AppDatabase = INSTANCE ?: synchronized(this) {
             INSTANCE ?: Room.databaseBuilder(
                 context.applicationContext,
                 AppDatabase::class.java,
                 "clinic_collections.db"
-            ).addMigrations(MIGRATION_1_2).build().also { INSTANCE = it }
+            ).addMigrations(MIGRATION_1_2, MIGRATION_2_3).build().also { INSTANCE = it }
         }
     }
 }

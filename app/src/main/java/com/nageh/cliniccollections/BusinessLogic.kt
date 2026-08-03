@@ -34,9 +34,24 @@ fun invoiceSuffix(value: String): String = value.trim().removePrefix(INVOICE_PRE
 fun fullInvoiceNumber(value: String): String = INVOICE_PREFIX + invoiceSuffix(value)
 
 fun validInvoiceSuffix(value: String): Boolean =
-    Regex("^(0[1-9]|1[0-2])/\\d{3,}$").matches(invoiceSuffix(value))
+    Regex("^(0[1-9]|1[0-2])/\\d{1,4}$").matches(invoiceSuffix(value))
 
-fun normalizePhone(value: String): String = value.filter(Char::isDigit).removePrefix("00")
+fun formatInvoiceSuffixInput(value: String): String {
+    val digits = invoiceSuffix(value).filter(Char::isDigit).take(6)
+    if (digits.length < 2) return digits
+    if (digits.length == 2) return "$digits/"
+    return digits.take(2) + "/" + digits.drop(2).take(4)
+}
+
+fun normalizePhone(value: String): String {
+    val digits = value.filter(Char::isDigit).removePrefix("00")
+    return when {
+        digits.startsWith("971") -> digits
+        digits.startsWith("0") -> "971" + digits.drop(1)
+        digits.length == 9 && digits.startsWith("5") -> "971$digits"
+        else -> digits
+    }
+}
 
 /**
  * Parses a user-entered AED amount into integer fils.
@@ -64,7 +79,7 @@ fun validateForm(
     collected: String
 ): String? {
     if (clinic.isBlank()) return "Clinic name is required."
-    if (!validInvoiceSuffix(invoiceSuffix)) return "Invoice suffix must look like 08/003."
+    if (!validInvoiceSuffix(invoiceSuffix)) return "Use month/number, e.g. 08/3 or 12/1234."
     if (normalizePhone(phone).length < 8) {
         return "Enter a WhatsApp number in international format, e.g. 971501234567."
     }
