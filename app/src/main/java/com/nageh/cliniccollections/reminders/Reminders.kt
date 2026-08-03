@@ -13,6 +13,10 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import com.nageh.cliniccollections.ClinicApp
+import com.nageh.cliniccollections.aed
+import com.nageh.cliniccollections.collectionState
+import com.nageh.cliniccollections.formatDate
+import com.nageh.cliniccollections.stateLabel
 import com.nageh.cliniccollections.MainActivity
 import com.nageh.cliniccollections.R
 import com.nageh.cliniccollections.data.AppDatabase
@@ -23,14 +27,14 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import java.time.ZoneId
-import java.time.format.DateTimeFormatter
-import java.util.Locale
 
 private val receiverScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
 object ReminderScheduler {
 
-    private const val HOUR = 9
+    /** Both reminders fire at 10:30 local device time. */
+    private const val HOUR = 10
+    private const val MINUTE = 30
     private val OFFSETS = listOf(-1, 0)
 
     fun schedule(context: Context, item: InvoiceEntity) {
@@ -42,7 +46,7 @@ object ReminderScheduler {
     private fun scheduleOne(context: Context, item: InvoiceEntity, offset: Int) {
         val triggerAt = item.collectionDate
             .plusDays(offset.toLong())
-            .atTime(HOUR, 0)
+            .atTime(HOUR, MINUTE)
             .atZone(ZoneId.systemDefault())
             .toInstant()
             .toEpochMilli()
@@ -127,11 +131,21 @@ private fun showNotification(context: Context, invoice: InvoiceEntity, offset: I
         PackageManager.PERMISSION_GRANTED
     ) return
 
-    val title = if (offset == -1) "Collection scheduled tomorrow" else "Collection scheduled today"
-    val amount = String.format(Locale.US, "AED %,.2f", invoice.dueAmountMinor / 100.0)
-    val status = invoice.computedStatus().name
-    val body = "${invoice.clinicName} - $amount - Invoice ${invoice.invoiceNumber} - " +
-        "Collect ${invoice.collectionDate} - Due ${invoice.dueDate} - Status: $status"
+    val title = if (offset == -1) {
+        "Collection tomorrow: ${invoice.clinicName}"
+    } else {
+        "Collection today: ${invoice.clinicName}"
+    }
+    val status = stateLabel(collectionState(invoice))
+    val summary = "${aed(invoice.dueAmountMinor)} - ${invoice.invoiceNumber}"
+    val expanded = buildString {
+        append(invoice.clinicName).append('\n')
+        append("Amount: ").append(aed(invoice.dueAmountMinor)).append('\n')
+        append("Invoice: ").append(invoice.invoiceNumber).append('\n')
+        append("Collection date: ").append(formatDate(invoice.collectionDate)).append('\n')
+        append("Due date: ").append(formatDate(invoice.dueDate)).append('\n')
+        append("Status: ").append(status)
+    }
 
     val openIntent = Intent(context, MainActivity::class.java)
         .putExtra(ReminderScheduler.EXTRA_INVOICE_ID, invoice.id)
@@ -147,11 +161,18 @@ private fun showNotification(context: Context, invoice: InvoiceEntity, offset: I
     val notification = NotificationCompat.Builder(context, ClinicApp.CHANNEL_ID)
         .setSmallIcon(R.drawable.ic_notification)
         .setContentTitle(title)
-        .setContentText(body)
-        .setStyle(NotificationCompat.BigTextStyle().bigText(body))
+        .setContentText(summary)
+        .setStyle(NotificationCompat.BigTextStyle().bigText(expanded).setBigContentTitle(title))
         .setContentIntent(contentIntent)
         .setAutoCancel(true)
         .setPriority(NotificationCompat.PRIORITY_HIGH)
+        .setCategory(NotificationCompat.CATEGORY_REMINDER)
+        .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+        // Channel settings win on API 26+, but these keep the intent explicit and
+        // cover any OEM that falls back to builder-level defaults.
+        .setDefaults(NotificationCompat.DEFAULT_SOUND or NotificationCompat.DEFAULT_VIBRATE)
+        .setVibrate(longArrayOf(0L, 400L, 200L, 400L))
+        .setOnlyAlertOnce(false)
         .build()
 
     NotificationManagerCompat.from(context)

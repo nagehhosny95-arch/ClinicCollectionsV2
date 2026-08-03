@@ -37,6 +37,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.nageh.cliniccollections.aed
+import com.nageh.cliniccollections.collectedInMonth
 import com.nageh.cliniccollections.data.InvoiceDao
 import com.nageh.cliniccollections.formatMonth
 import com.nageh.cliniccollections.report
@@ -60,6 +61,12 @@ fun ReportsScreen(dao: InvoiceDao, contentPadding: PaddingValues) {
     }
     val rows by flow.collectAsStateWithLifecycle(emptyList())
     val totals = remember(rows, today) { report(rows, today) }
+
+    // Total collected is independent of the Due Date / Collection Date selector: it is
+    // always the money actually collected during the selected calendar month, which is
+    // why it needs the full invoice list rather than the month-filtered query above.
+    val allRows by remember { dao.observeAll() }.collectAsStateWithLifecycle(emptyList())
+    val collectedInSelectedMonth = remember(allRows, month) { collectedInMonth(allRows, month) }
     val basisName = if (basis == ReportBasis.DUE_DATE) "Due Date" else "Collection Date"
 
     LazyColumn(
@@ -127,7 +134,9 @@ fun ReportsScreen(dao: InvoiceDao, contentPadding: PaddingValues) {
                     }
                 }
                 Text(
-                    "All totals below are grouped by $basisName.",
+                    "Due, outstanding, overdue and scheduled collections are grouped by " +
+                        "$basisName. Collected in month always follows the Actual " +
+                        "Collection Date instead.",
                     style = MaterialTheme.typography.bodySmall,
                     color = TextMuted
                 )
@@ -155,8 +164,8 @@ fun ReportsScreen(dao: InvoiceDao, contentPadding: PaddingValues) {
                     Modifier.weight(1f)
                 )
                 SummaryCard(
-                    "Total collected",
-                    aed(totals.totalCollectedMinor),
+                    "Collected in month",
+                    aed(collectedInSelectedMonth),
                     Icons.Default.TrendingUp,
                     Modifier.weight(1f),
                     accent = OkGreen,

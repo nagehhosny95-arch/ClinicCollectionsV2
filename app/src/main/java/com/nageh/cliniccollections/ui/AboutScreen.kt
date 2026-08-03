@@ -75,7 +75,7 @@ fun AboutScreen(contentPadding: PaddingValues) {
             )
             InfoRow("Invoice prefix", INVOICE_PREFIX)
             InfoRow("Date format", "DD/MM/YYYY")
-            InfoRow("Reminders", "09:00, day before and on the day")
+            InfoRow("Reminders", "10:30, day before and on the day")
             InfoRow("Minimum Android", "Android 10 (API 29)")
         }
 
@@ -97,8 +97,8 @@ fun AboutScreen(contentPadding: PaddingValues) {
 
         SectionCard("How reminders work", Icons.Default.EventAvailable) {
             Text(
-                "Two alarms are set for every unpaid invoice: one at 09:00 the day before " +
-                    "the collection date, and one at 09:00 on the collection date itself. " +
+                "Two alarms are set for every unpaid invoice: one at 10:30 the day before " +
+                    "the collection date, and one at 10:30 on the collection date itself. " +
                     "They survive a reboot, and they are cancelled as soon as an invoice is " +
                     "marked as paid.",
                 style = MaterialTheme.typography.bodyMedium,

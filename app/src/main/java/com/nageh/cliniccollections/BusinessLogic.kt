@@ -159,3 +159,72 @@ fun dashboardCounts(
     collectionDue = rows.count { collectionState(it, today) == CollectionState.COLLECTION_DUE },
     paymentOverdue = rows.count { collectionState(it, today) == CollectionState.PAYMENT_OVERDUE }
 )
+
+// ---------------------------------------------------------------------------
+// Invoice suffix: automatic slash with a sane caret position.
+//
+// The user only ever types digits. After the two month digits a "/" is inserted
+// automatically and the caret is placed after it, so the sequence can be typed
+// straight away. Deleting the slash is allowed and does not re-add it, which is
+// what stops the caret from being trapped when erasing the month.
+// ---------------------------------------------------------------------------
+
+/** Result of formatting a suffix edit: the text to show and where to put the caret. */
+data class SuffixEdit(val text: String, val caret: Int)
+
+private const val MAX_SUFFIX_DIGITS = 6
+
+fun formatSuffixEdit(newText: String, caret: Int, oldText: String): SuffixEdit {
+    val deleting = newText.length < oldText.length
+    // The user removed the automatic slash itself, so respect that and leave it off.
+    val removedSlash = deleting && oldText.endsWith("/") && !newText.endsWith("/")
+
+    val digits = newText.filter(Char::isDigit).take(MAX_SUFFIX_DIGITS)
+    val formatted = when {
+        digits.length < 2 -> digits
+        digits.length == 2 -> if (removedSlash) digits else "$digits/"
+        else -> digits.take(2) + "/" + digits.drop(2)
+    }
+
+    // Keep the caret after the same number of digits the user had passed.
+    val safeCaret = caret.coerceIn(0, newText.length)
+    val digitsBefore = newText.take(safeCaret).count(Char::isDigit).coerceAtMost(digits.length)
+
+    var position = 0
+    var seen = 0
+    while (position < formatted.length && seen < digitsBefore) {
+        if (formatted[position].isDigit()) seen++
+        position++
+    }
+    if (!removedSlash && position < formatted.length && formatted[position] == '/') position++
+
+    return SuffixEdit(formatted, position)
+}
+
+/** True when the two month digits are present and fall between 01 and 12. */
+fun hasValidInvoiceMonth(suffix: String): Boolean {
+    val month = invoiceSuffix(suffix).takeWhile(Char::isDigit).take(2)
+    return month.length == 2 && month.toInt() in 1..12
+}
+
+// ---------------------------------------------------------------------------
+// Collected totals.
+//
+// An amount belongs to the calendar month in which it was ACTUALLY collected,
+// which is actualPaymentDate. The scheduled collection date and the due date
+// never decide this: an invoice scheduled for October and due in November but
+// paid in August counts towards August.
+// ---------------------------------------------------------------------------
+
+/**
+ * Sum of what was actually collected in [month].
+ *
+ * Pass the complete invoice list, not a month-filtered one: membership is decided
+ * here by actualPaymentDate. Rows with no actual collection date are excluded.
+ * The per-row cap at the due amount matches the existing totalCollectedMinor rule,
+ * so a partial collection is counted in full and an over-collection cannot inflate
+ * the month.
+ */
+fun collectedInMonth(rows: List<InvoiceEntity>, month: YearMonth): Long = rows
+    .filter { it.actualPaymentDate != null && YearMonth.from(it.actualPaymentDate) == month }
+    .sumOf { it.collectedAmountMinor.coerceAtMost(it.dueAmountMinor) }

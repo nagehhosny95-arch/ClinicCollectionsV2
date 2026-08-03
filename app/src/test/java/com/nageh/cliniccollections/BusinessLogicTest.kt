@@ -7,6 +7,7 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Test
 import java.time.LocalDate
+import java.time.YearMonth
 
 class BusinessLogicTest {
 
@@ -227,5 +228,176 @@ class BusinessLogicTest {
         assertEquals("971508984903", normalizePhone("0508984903"))
         assertEquals("971508984903", normalizePhone("508984903"))
         assertEquals("971508984903", normalizePhone("00971508984903"))
+    }
+
+    // ------------------------------------------------------------------
+    // Automatic slash and caret position
+    // ------------------------------------------------------------------
+
+    /** Simulates typing one character at the end of the current field value. */
+    private fun type(current: SuffixEdit, ch: Char): SuffixEdit {
+        val inserted = current.text.take(current.caret) + ch + current.text.drop(current.caret)
+        return formatSuffixEdit(inserted, current.caret + 1, current.text)
+    }
+
+    /** Simulates one backspace at the current caret position. */
+    private fun backspace(current: SuffixEdit): SuffixEdit {
+        if (current.caret == 0) return current
+        val removed = current.text.take(current.caret - 1) + current.text.drop(current.caret)
+        return formatSuffixEdit(removed, current.caret - 1, current.text)
+    }
+
+    @Test
+    fun slashIsInsertedAfterTheMonthWithTheCaretBehindIt() {
+        var field = SuffixEdit("", 0)
+        field = type(field, '0')
+        assertEquals("0", field.text)
+        assertEquals(1, field.caret)
+
+        field = type(field, '8')
+        assertEquals("08/", field.text)
+        assertEquals(3, field.caret)
+
+        field = type(field, '3')
+        assertEquals("08/3", field.text)
+        assertEquals(4, field.caret)
+    }
+
+    @Test
+    fun everySequenceLengthFromOneToFourDigitsIsBuilt() {
+        var field = SuffixEdit("", 0)
+        "08003".forEach { field = type(field, it) }
+        assertEquals("08/003", field.text)
+        assertEquals(6, field.caret)
+        assertEquals(true, validInvoiceSuffix(field.text))
+
+        val cases = mapOf(
+            "121" to "12/1",
+            "1212" to "12/12",
+            "12123" to "12/123",
+            "121234" to "12/1234"
+        )
+        cases.forEach { (typed, expected) ->
+            var f = SuffixEdit("", 0)
+            typed.forEach { f = type(f, it) }
+            assertEquals(expected, f.text)
+            assertEquals(true, validInvoiceSuffix(f.text))
+        }
+    }
+
+    @Test
+    fun deletingTheSlashDoesNotTrapTheCaretOrReAddIt() {
+        var field = SuffixEdit("", 0)
+        "08".forEach { field = type(field, it) }
+        assertEquals("08/", field.text)
+
+        field = backspace(field)
+        assertEquals("08", field.text)
+        assertEquals(2, field.caret)
+
+        // The slash must stay gone so the month digits can actually be erased.
+        field = backspace(field)
+        assertEquals("0", field.text)
+        assertEquals(1, field.caret)
+
+        field = backspace(field)
+        assertEquals("", field.text)
+        assertEquals(0, field.caret)
+    }
+
+    @Test
+    fun deletingASequenceDigitKeepsTheSlashAndTheCaretAfterIt() {
+        var field = SuffixEdit("", 0)
+        "083".forEach { field = type(field, it) }
+        assertEquals("08/3", field.text)
+
+        field = backspace(field)
+        assertEquals("08/", field.text)
+        assertEquals(3, field.caret)
+
+        field = type(field, '9')
+        assertEquals("08/9", field.text)
+    }
+
+    @Test
+    fun typedInputIsLimitedAndNonDigitsAreIgnored() {
+        var field = SuffixEdit("", 0)
+        "1212345678".forEach { field = type(field, it) }
+        assertEquals("12/1234", field.text)
+
+        assertEquals("08/3", formatSuffixEdit("0a8/b3", 6, "").text)
+    }
+
+    @Test
+    fun onlyMonthsFromOneToTwelveAreAccepted() {
+        listOf("01", "02", "08", "09", "10", "11", "12").forEach { month ->
+            assertEquals(true, hasValidInvoiceMonth("$month/3"))
+            assertEquals(true, validInvoiceSuffix("$month/3"))
+        }
+        listOf("00", "13", "20", "99").forEach { month ->
+            assertEquals(false, hasValidInvoiceMonth("$month/3"))
+            assertEquals(false, validInvoiceSuffix("$month/3"))
+        }
+        assertEquals(false, hasValidInvoiceMonth("8/3"))
+        assertEquals(false, validInvoiceSuffix("8/3"))
+    }
+
+    // ------------------------------------------------------------------
+    // Total collected follows the ACTUAL collection date
+    // ------------------------------------------------------------------
+
+    @Test
+    fun collectedIsCountedInTheMonthItWasActuallyCollected() {
+        // Scheduled for October, due in November, actually collected in August.
+        val row = invoice(
+            due = 100000,
+            collected = 100000,
+            dueDate = LocalDate.of(2026, 11, 15),
+            collectionDate = LocalDate.of(2026, 10, 5),
+            paidOn = LocalDate.of(2026, 8, 20)
+        )
+        val rows = listOf(row)
+
+        assertEquals(100000, collectedInMonth(rows, YearMonth.of(2026, 8)))
+        assertEquals(0, collectedInMonth(rows, YearMonth.of(2026, 10)))
+        assertEquals(0, collectedInMonth(rows, YearMonth.of(2026, 11)))
+    }
+
+    @Test
+    fun partialCollectionsCountAtTheirCollectedAmount() {
+        val rows = listOf(
+            invoice(number = "1", due = 100000, collected = 40000, paidOn = LocalDate.of(2026, 8, 3)),
+            invoice(number = "2", due = 50000, collected = 50000, paidOn = LocalDate.of(2026, 8, 28)),
+            invoice(number = "3", due = 70000, collected = 70000, paidOn = LocalDate.of(2026, 9, 1))
+        )
+        assertEquals(90000, collectedInMonth(rows, YearMonth.of(2026, 8)))
+        assertEquals(70000, collectedInMonth(rows, YearMonth.of(2026, 9)))
+    }
+
+    @Test
+    fun invoicesWithoutAnActualCollectionDateAreExcluded() {
+        val rows = listOf(
+            invoice(number = "1", due = 100000, collected = 100000, paidOn = null),
+            invoice(number = "2", due = 30000, collected = 30000, paidOn = LocalDate.of(2026, 8, 9))
+        )
+        assertEquals(30000, collectedInMonth(rows, YearMonth.of(2026, 8)))
+    }
+
+    @Test
+    fun overCollectionCannotInflateAMonth() {
+        val rows = listOf(
+            invoice(due = 10000, collected = 12000, paidOn = LocalDate.of(2026, 8, 9))
+        )
+        assertEquals(10000, collectedInMonth(rows, YearMonth.of(2026, 8)))
+    }
+
+    @Test
+    fun movingTheActualCollectionDateMovesTheMoney() {
+        val original = invoice(due = 80000, collected = 80000, paidOn = LocalDate.of(2026, 8, 4))
+        assertEquals(80000, collectedInMonth(listOf(original), YearMonth.of(2026, 8)))
+
+        val edited = original.copy(actualPaymentDate = LocalDate.of(2026, 9, 4))
+        assertEquals(0, collectedInMonth(listOf(edited), YearMonth.of(2026, 8)))
+        assertEquals(80000, collectedInMonth(listOf(edited), YearMonth.of(2026, 9)))
     }
 }

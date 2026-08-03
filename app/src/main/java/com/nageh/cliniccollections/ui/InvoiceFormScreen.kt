@@ -46,7 +46,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.nageh.cliniccollections.INVOICE_PREFIX
@@ -55,7 +57,7 @@ import com.nageh.cliniccollections.data.ClinicEntity
 import com.nageh.cliniccollections.data.InvoiceDao
 import com.nageh.cliniccollections.data.InvoiceEntity
 import com.nageh.cliniccollections.data.PaymentStatus
-import com.nageh.cliniccollections.formatInvoiceSuffixInput
+import com.nageh.cliniccollections.hasValidInvoiceMonth
 import com.nageh.cliniccollections.fullInvoiceNumber
 import com.nageh.cliniccollections.invoiceSuffix
 import com.nageh.cliniccollections.money
@@ -88,7 +90,7 @@ fun InvoiceFormScreen(
     var loaded by remember { mutableStateOf(invoiceId == null) }
     var clinic by remember { mutableStateOf("") }
     var phone by remember { mutableStateOf("") }
-    var suffix by remember { mutableStateOf("") }
+    var suffixField by remember { mutableStateOf(TextFieldValue("")) }
     var amount by remember { mutableStateOf("") }
     var due by remember { mutableStateOf<LocalDate?>(null) }
     var collection by remember { mutableStateOf<LocalDate?>(null) }
@@ -98,6 +100,7 @@ fun InvoiceFormScreen(
     var submitted by remember { mutableStateOf(false) }
     var saving by remember { mutableStateOf(false) }
     var selectedClinicId by remember { mutableStateOf(presetClinicId) }
+    val suffix = suffixField.text
 
     val savedClinics by clinicDao.observeAll().collectAsStateWithLifecycle(emptyList())
     val clinicMatches = remember(clinic, savedClinics) {
@@ -114,7 +117,8 @@ fun InvoiceFormScreen(
                 original = item
                 clinic = item.clinicName
                 phone = item.whatsappNumber
-                suffix = invoiceSuffix(item.invoiceNumber)
+                val existingSuffix = invoiceSuffix(item.invoiceNumber)
+                suffixField = TextFieldValue(existingSuffix, TextRange(existingSuffix.length))
                 selectedClinicId = item.clinicId
                 amount = money(item.dueAmountMinor).replace(",", "")
                 due = item.dueDate
@@ -253,16 +257,18 @@ fun InvoiceFormScreen(
             }
 
             SectionCard("Invoice details", Icons.Default.ReceiptLong) {
-                AppField(
-                    suffix,
-                    { suffix = formatInvoiceSuffixInput(it) },
-                    "Invoice number",
-                    prefix = INVOICE_PREFIX,
+                AppSuffixField(
+                    value = suffixField,
+                    onChange = { suffixField = it },
                     isError = suffixError,
                     supporting = if (suffixError) {
-                        "Use month/number, e.g. 08/3, 08/33, 08/003 or 08/1234."
+                        if (!hasValidInvoiceMonth(suffix)) {
+                            "The month must be between 01 and 12."
+                        } else {
+                            "Add the sequence after the slash, e.g. 08/3 or 08/1234."
+                        }
                     } else {
-                        "Month then 1–4 digits, e.g. 08/3 or 12/1234"
+                        "Type the month, the slash is added for you. Example: 08/003"
                     }
                 )
                 AppField(
@@ -285,14 +291,20 @@ fun InvoiceFormScreen(
                     isError = collectionError
                 )
                 Text(
-                    "Reminders are scheduled at 09:00 the day before and on the collection date.",
+                    "Reminders are scheduled at 10:30 the day before and on the collection date.",
                     style = MaterialTheme.typography.bodySmall,
                     color = TextMuted
                 )
             }
 
             SectionCard("Payment (optional)", Icons.Default.Payments) {
-                AppDateField("Actual paid date", paidDate, { paidDate = it }, allowClear = true)
+                Text(
+                    "The Actual Collection Date decides which month the collected amount " +
+                        "is reported in.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextMuted
+                )
+                AppDateField("Actual Collection Date", paidDate, { paidDate = it }, allowClear = true)
                 AppField(
                     collected,
                     { collected = it },

@@ -59,13 +59,17 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.nageh.cliniccollections.aed
 import com.nageh.cliniccollections.collectionState
 import com.nageh.cliniccollections.data.InvoiceEntity
+import com.nageh.cliniccollections.INVOICE_PREFIX
 import com.nageh.cliniccollections.formatDate
+import com.nageh.cliniccollections.formatSuffixEdit
 import com.nageh.cliniccollections.normalizePhone
 import com.nageh.cliniccollections.reminderMessage
 import java.net.URLEncoder
@@ -322,6 +326,36 @@ fun AppField(
     supportingText = supporting?.let { { Text(it, style = MaterialTheme.typography.bodySmall) } },
     isError = isError,
     keyboardOptions = KeyboardOptions(keyboardType = keyboardType),
+    singleLine = true,
+    shape = MaterialTheme.shapes.small
+)
+
+/**
+ * Invoice suffix input.
+ *
+ * The prefix is a non-editable slot, the keyboard is numeric, and [formatSuffixEdit]
+ * inserts the "/" after the month while placing the caret behind it, so the sequence
+ * can be typed without ever reaching for the slash key.
+ */
+@Composable
+fun AppSuffixField(
+    value: TextFieldValue,
+    onChange: (TextFieldValue) -> Unit,
+    modifier: Modifier = Modifier,
+    isError: Boolean = false,
+    supporting: String? = null
+) = OutlinedTextField(
+    value = value,
+    onValueChange = { typed ->
+        val edit = formatSuffixEdit(typed.text, typed.selection.start, value.text)
+        onChange(TextFieldValue(edit.text, TextRange(edit.caret)))
+    },
+    modifier = modifier.fillMaxWidth(),
+    label = { Text("Invoice number") },
+    prefix = { Text(INVOICE_PREFIX, fontWeight = FontWeight.Bold) },
+    supportingText = supporting?.let { { Text(it, style = MaterialTheme.typography.bodySmall) } },
+    isError = isError,
+    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
     singleLine = true,
     shape = MaterialTheme.shapes.small
 )

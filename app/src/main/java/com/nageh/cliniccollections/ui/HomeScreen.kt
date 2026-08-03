@@ -42,6 +42,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.nageh.cliniccollections.R
 import com.nageh.cliniccollections.aed
+import com.nageh.cliniccollections.collectedInMonth
 import com.nageh.cliniccollections.dashboardCounts
 import com.nageh.cliniccollections.data.InvoiceDao
 import com.nageh.cliniccollections.formatMonth
@@ -66,6 +67,10 @@ fun HomeScreen(
     val today = remember { LocalDate.now() }
     val totals = remember(all, today) { report(all, today) }
     val counts = remember(all, today) { dashboardCounts(all, today) }
+    // Collected is decided by the Actual Collection Date, never by the scheduled
+    // collection date or the due date.
+    val currentMonth = remember { YearMonth.now() }
+    val collectedThisMonth = remember(all, currentMonth) { collectedInMonth(all, currentMonth) }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -98,8 +103,8 @@ fun HomeScreen(
                     Modifier.weight(1f)
                 )
                 SummaryCard(
-                    "Total collected",
-                    aed(totals.totalCollectedMinor),
+                    "Collected this month",
+                    aed(collectedThisMonth),
                     Icons.Default.TrendingUp,
                     Modifier.weight(1f),
                     accent = OkGreen,

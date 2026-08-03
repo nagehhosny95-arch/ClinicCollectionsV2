@@ -120,14 +120,14 @@ fun InvoiceDetailScreen(
                     InfoRow("Collection date", formatDate(row.collectionDate))
                     InfoRow(
                         "Reminders",
-                        if (isPaid) "Cancelled (invoice paid)" else "09:00 the day before and on the day"
+                        if (isPaid) "Cancelled (invoice paid)" else "10:30 the day before and on the day"
                     )
                 }
             }
 
             item {
                 SectionCard("Payment information", Icons.Default.Payments) {
-                    InfoRow("Actual paid date", formatDateOrDash(row.actualPaymentDate))
+                    InfoRow("Actual Collection Date", formatDateOrDash(row.actualPaymentDate))
                     InfoRow("Collected", aed(row.collectedAmountMinor))
                     InfoRow(
                         "Remaining",
