@@ -1,5 +1,6 @@
 <resources>
     <string name="app_name">Clinic Collections</string>
+    <string name="app_tagline">Smart Payment Tracking</string>
     <string name="notification_channel_name">Payment reminders</string>
-    <string name="notification_channel_description">Reminders one day before and on the invoice due date.</string>
+    <string name="notification_channel_description">Reminders one day before and on the invoice collection date.</string>
 </resources>

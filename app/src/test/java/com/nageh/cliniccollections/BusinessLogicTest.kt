@@ -129,4 +129,103 @@ class BusinessLogicTest {
         assert(text.contains("INV-7"))
         assert(text.contains("Al Noor Clinic"))
     }
+
+    // ------------------------------------------------------------------
+    // Card status colour rules. These encode the existing business rules
+    // exactly; the visual redesign must not change any of them.
+    // ------------------------------------------------------------------
+
+    @Test
+    fun paidInvoicesAreAlwaysGreen() {
+        val today = LocalDate.of(2026, 8, 10)
+        val paidByDate = invoice(dueDate = today.minusDays(30), collectionDate = today.minusDays(40), paidOn = today)
+        assertEquals(CollectionState.PAID, collectionState(paidByDate, today))
+        val paidInFull = invoice(due = 10000, collected = 10000, dueDate = today.minusDays(5))
+        assertEquals(CollectionState.PAID, collectionState(paidInFull, today))
+        val manualPaid = invoice(dueDate = today.minusDays(5)).copy(manualStatus = PaymentStatus.PAID)
+        assertEquals(CollectionState.PAID, collectionState(manualPaid, today))
+        assertEquals("Paid", stateLabel(CollectionState.PAID))
+    }
+
+    @Test
+    fun overduePaymentBeatsCollectionDue() {
+        val today = LocalDate.of(2026, 8, 10)
+        // Due date passed and unpaid -> red, even though the collection date also passed.
+        val row = invoice(dueDate = today.minusDays(1), collectionDate = today.minusDays(3))
+        assertEquals(CollectionState.PAYMENT_OVERDUE, collectionState(row, today))
+        assertEquals("Payment Overdue", stateLabel(CollectionState.PAYMENT_OVERDUE))
+    }
+
+    @Test
+    fun collectionDueIsOrangeWhileDueDateHasNotPassed() {
+        val today = LocalDate.of(2026, 8, 10)
+        assertEquals(
+            CollectionState.COLLECTION_DUE,
+            collectionState(invoice(dueDate = today.plusDays(20), collectionDate = today), today)
+        )
+        assertEquals(
+            CollectionState.COLLECTION_DUE,
+            collectionState(invoice(dueDate = today.plusDays(20), collectionDate = today.minusDays(4)), today)
+        )
+        assertEquals("Collection Due", stateLabel(CollectionState.COLLECTION_DUE))
+    }
+
+    @Test
+    fun futureCollectionIsOnTrack() {
+        val today = LocalDate.of(2026, 8, 10)
+        val row = invoice(dueDate = today.plusDays(30), collectionDate = today.plusDays(2))
+        assertEquals(CollectionState.NORMAL, collectionState(row, today))
+        assertEquals("On Track", stateLabel(CollectionState.NORMAL))
+    }
+
+    @Test
+    fun dashboardCountsUseTheSameRulesAsTheCards() {
+        val today = LocalDate.of(2026, 8, 10)
+        val rows = listOf(
+            invoice(number = "1", dueDate = today.plusDays(20), collectionDate = today),
+            invoice(number = "2", dueDate = today.minusDays(1), collectionDate = today.minusDays(5)),
+            invoice(number = "3", dueDate = today.plusDays(30), collectionDate = today.plusDays(5)),
+            invoice(number = "4", dueDate = today.minusDays(9), collectionDate = today.minusDays(9), paidOn = today)
+        )
+        val counts = dashboardCounts(rows, today)
+        assertEquals(1, counts.collectionDue)
+        assertEquals(1, counts.paymentOverdue)
+    }
+
+    // ------------------------------------------------------------------
+    // Presentation helpers
+    // ------------------------------------------------------------------
+
+    @Test
+    fun datesAreDisplayedAsDayMonthYear() {
+        assertEquals("10/08/2026", formatDate(LocalDate.of(2026, 8, 10)))
+        assertEquals("01/01/2026", formatDate(LocalDate.of(2026, 1, 1)))
+        assertEquals("\u2014", formatDateOrDash(null))
+        assertEquals("August 2026", formatMonth(java.time.YearMonth.of(2026, 8)))
+    }
+
+    @Test
+    fun searchAcceptsDisplayedAndStoredDateFormats() {
+        assertEquals("2026-08-10", normalizeSearchQuery("10/08/2026"))
+        assertEquals("2026-08-10", normalizeSearchQuery(" 10/08/2026 "))
+        assertEquals("Al Noor", normalizeSearchQuery("Al Noor"))
+        assertEquals("08/003", normalizeSearchQuery("08/003"))
+    }
+
+    @Test
+    fun invoiceSuffixAcceptsEveryDocumentedShape() {
+        assertEquals(true, validInvoiceSuffix("08/3"))
+        assertEquals(true, validInvoiceSuffix("08/33"))
+        assertEquals(true, validInvoiceSuffix("08/003"))
+        assertEquals(true, validInvoiceSuffix("08/1234"))
+        assertEquals("INV/2026/08/1234", fullInvoiceNumber("08/1234"))
+    }
+
+    @Test
+    fun localAndInternationalWhatsappNumbersBothNormalise() {
+        assertEquals("971508984903", normalizePhone("+971 50 898 4903"))
+        assertEquals("971508984903", normalizePhone("0508984903"))
+        assertEquals("971508984903", normalizePhone("508984903"))
+        assertEquals("971508984903", normalizePhone("00971508984903"))
+    }
 }

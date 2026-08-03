@@ -6,6 +6,8 @@ import com.nageh.cliniccollections.data.PaymentStatus
 import java.math.BigDecimal
 import java.math.RoundingMode
 import java.time.LocalDate
+import java.time.YearMonth
+import java.time.format.DateTimeFormatter
 import java.util.Locale
 
 /**
@@ -94,3 +96,66 @@ fun validateForm(
     }
     return null
 }
+
+// ---------------------------------------------------------------------------
+// Card status rules. Moved here unchanged from MainActivity so that the colour
+// rules are unit-tested rather than living inside a private UI helper.
+//
+//   Green  : paid, or on track.
+//   Orange : the collection date has arrived or passed, while the due date has not.
+//   Red    : the due date has passed and the invoice is unpaid.
+// ---------------------------------------------------------------------------
+
+enum class CollectionState { PAID, NORMAL, COLLECTION_DUE, PAYMENT_OVERDUE }
+
+fun collectionState(
+    invoice: InvoiceEntity,
+    today: LocalDate = LocalDate.now()
+): CollectionState = when {
+    invoice.computedStatus(today) == PaymentStatus.PAID -> CollectionState.PAID
+    invoice.dueDate.isBefore(today) -> CollectionState.PAYMENT_OVERDUE
+    !invoice.collectionDate.isAfter(today) -> CollectionState.COLLECTION_DUE
+    else -> CollectionState.NORMAL
+}
+
+fun stateLabel(state: CollectionState): String = when (state) {
+    CollectionState.PAID -> "Paid"
+    CollectionState.NORMAL -> "On Track"
+    CollectionState.COLLECTION_DUE -> "Collection Due"
+    CollectionState.PAYMENT_OVERDUE -> "Payment Overdue"
+}
+
+// ---------------------------------------------------------------------------
+// Presentation helpers, kept pure so both the UI and the tests use one source.
+// ---------------------------------------------------------------------------
+
+private val DISPLAY_DATE: DateTimeFormatter = DateTimeFormatter.ofPattern("dd/MM/yyyy", Locale.US)
+private val DISPLAY_MONTH: DateTimeFormatter = DateTimeFormatter.ofPattern("MMMM yyyy", Locale.US)
+
+fun formatDate(date: LocalDate): String = date.format(DISPLAY_DATE)
+
+fun formatDateOrDash(date: LocalDate?): String = date?.let(::formatDate) ?: "—"
+
+fun formatMonth(month: YearMonth): String = month.atDay(1).format(DISPLAY_MONTH)
+
+/** Lets the search box accept a displayed 10/08/2026 as well as the stored ISO form. */
+fun normalizeSearchQuery(value: String): String {
+    val clean = value.trim()
+    return runCatching { LocalDate.parse(clean, DISPLAY_DATE).toString() }.getOrDefault(clean)
+}
+
+fun aed(minor: Long): String = "AED ${money(minor)}"
+
+/** Dashboard counters derived from the same rules used to colour the cards. */
+data class DashboardCounts(
+    val collectionDue: Int,
+    val paymentOverdue: Int
+)
+
+fun dashboardCounts(
+    rows: List<InvoiceEntity>,
+    today: LocalDate = LocalDate.now()
+): DashboardCounts = DashboardCounts(
+    collectionDue = rows.count { collectionState(it, today) == CollectionState.COLLECTION_DUE },
+    paymentOverdue = rows.count { collectionState(it, today) == CollectionState.PAYMENT_OVERDUE }
+)

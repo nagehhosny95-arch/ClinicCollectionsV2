@@ -1,4 +1,6 @@
-# Clinic Collections (Android 10+) — v2
+# Clinic Collections (Android 10+)
+
+> Visual release: see `V3-VISUAL-CHANGES.md` for the icon, splash screen and UI changes. — v2
 
 > **Build instructions:** see `BUILD-AR.md` (دليل البناء بالعربية).
 > **What was changed in this revision:** see `FIXES.md`.

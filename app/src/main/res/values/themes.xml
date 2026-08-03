@@ -1,7 +1,24 @@
 <resources>
+
+    <!-- Theme the app runs in once the splash window has been dismissed. -->
     <style name="Theme.ClinicCollections" parent="android:style/Theme.Material.Light.NoActionBar">
-        <item name="android:colorAccent">@color/brand_green</item>
+        <item name="android:colorAccent">@color/brand_emerald</item>
         <item name="android:windowBackground">@color/window_background</item>
-        <item name="android:statusBarColor">@color/brand_green</item>
+        <item name="android:statusBarColor">@color/brand_emerald_deep</item>
+        <item name="android:navigationBarColor">@color/window_background</item>
     </style>
+
+    <!--
+        Launch theme. androidx.core.splashscreen renders this natively on Android 12+
+        and reproduces it with a compatible window background on Android 10 and 11,
+        so there is no artificial delay on any supported version.
+    -->
+    <style name="Theme.ClinicCollections.Splash" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/splash_background</item>
+        <item name="windowSplashScreenAnimatedIcon">@mipmap/ic_launcher_foreground</item>
+        <item name="postSplashScreenTheme">@style/Theme.ClinicCollections</item>
+        <item name="android:statusBarColor">@color/splash_background</item>
+        <item name="android:navigationBarColor">@color/splash_background</item>
+    </style>
+
 </resources>
