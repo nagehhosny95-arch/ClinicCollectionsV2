@@ -31,13 +31,18 @@ android {
         }
     }
 
+    val stableSigningConfig = signingConfigs.findByName("release")
+
     buildTypes {
         debug {
             isMinifyEnabled = false
+            if (stableSigningConfig != null) {
+                signingConfig = stableSigningConfig
+            }
         }
         release {
             isMinifyEnabled = false
-            signingConfig = signingConfigs.findByName("release")
+            signingConfig = stableSigningConfig
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }
