@@ -51,7 +51,6 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.nageh.cliniccollections.INVOICE_PREFIX
 import com.nageh.cliniccollections.data.ClinicDao
 import com.nageh.cliniccollections.data.ClinicEntity
 import com.nageh.cliniccollections.data.InvoiceDao
@@ -60,6 +59,7 @@ import com.nageh.cliniccollections.data.PaymentStatus
 import com.nageh.cliniccollections.hasValidInvoiceMonth
 import com.nageh.cliniccollections.fullInvoiceNumber
 import com.nageh.cliniccollections.invoiceSuffix
+import com.nageh.cliniccollections.invoicePrefix
 import com.nageh.cliniccollections.money
 import com.nageh.cliniccollections.normalizePhone
 import com.nageh.cliniccollections.parseMoney
@@ -91,6 +91,7 @@ fun InvoiceFormScreen(
     var clinic by remember { mutableStateOf("") }
     var phone by remember { mutableStateOf("") }
     var suffixField by remember { mutableStateOf(TextFieldValue("")) }
+    var invoiceDate by remember { mutableStateOf(LocalDate.now()) }
     var amount by remember { mutableStateOf("") }
     var due by remember { mutableStateOf<LocalDate?>(null) }
     var collection by remember { mutableStateOf<LocalDate?>(null) }
@@ -119,6 +120,7 @@ fun InvoiceFormScreen(
                 phone = item.whatsappNumber
                 val existingSuffix = invoiceSuffix(item.invoiceNumber)
                 suffixField = TextFieldValue(existingSuffix, TextRange(existingSuffix.length))
+                invoiceDate = item.invoiceDate
                 selectedClinicId = item.clinicId
                 amount = money(item.dueAmountMinor).replace(",", "")
                 due = item.dueDate
@@ -257,9 +259,20 @@ fun InvoiceFormScreen(
             }
 
             SectionCard("Invoice details", Icons.Default.ReceiptLong) {
+                AppDateField(
+                    "Invoice Date",
+                    invoiceDate,
+                    { selected -> if (selected != null) invoiceDate = selected }
+                )
+                Text(
+                    "Controls the invoice month report and the year in ${invoicePrefix(invoiceDate)}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextMuted
+                )
                 AppSuffixField(
                     value = suffixField,
                     onChange = { suffixField = it },
+                    prefix = invoicePrefix(invoiceDate),
                     isError = suffixError,
                     supporting = if (suffixError) {
                         if (!hasValidInvoiceMonth(suffix)) {
@@ -336,7 +349,7 @@ fun InvoiceFormScreen(
                     saving = true
                     scope.launch {
                         try {
-                            val fullNumber = fullInvoiceNumber(suffix)
+                            val fullNumber = fullInvoiceNumber(invoiceDate, suffix)
                             if (fullNumber != original?.invoiceNumber &&
                                 dao.countByInvoiceNumber(fullNumber) > 0
                             ) {
@@ -364,6 +377,7 @@ fun InvoiceFormScreen(
                                     whatsappNumber = normalizePhone(phone),
                                     invoiceNumber = fullNumber,
                                     dueAmountMinor = parseMoney(amount),
+                                    invoiceDate = invoiceDate,
                                     dueDate = due!!,
                                     collectionDate = collection!!,
                                     actualPaymentDate = paidDate,

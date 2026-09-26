@@ -67,7 +67,6 @@ import androidx.compose.ui.unit.dp
 import com.nageh.cliniccollections.aed
 import com.nageh.cliniccollections.collectionState
 import com.nageh.cliniccollections.data.InvoiceEntity
-import com.nageh.cliniccollections.INVOICE_PREFIX
 import com.nageh.cliniccollections.formatDate
 import com.nageh.cliniccollections.formatSuffixEdit
 import com.nageh.cliniccollections.normalizePhone
@@ -237,10 +236,12 @@ fun SummaryCard(
     icon: ImageVector,
     modifier: Modifier = Modifier,
     accent: Color = Emerald,
-    tint: Color = EmeraldSoft
+    tint: Color = EmeraldSoft,
+    onClick: (() -> Unit)? = null
 ) {
+    val cardModifier = if (onClick != null) modifier.clickable(onClick = onClick) else modifier
     Card(
-        modifier,
+        cardModifier,
         shape = MaterialTheme.shapes.large,
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
@@ -341,6 +342,7 @@ fun AppField(
 fun AppSuffixField(
     value: TextFieldValue,
     onChange: (TextFieldValue) -> Unit,
+    prefix: String,
     modifier: Modifier = Modifier,
     isError: Boolean = false,
     supporting: String? = null
@@ -352,7 +354,7 @@ fun AppSuffixField(
     },
     modifier = modifier.fillMaxWidth(),
     label = { Text("Invoice number") },
-    prefix = { Text(INVOICE_PREFIX, fontWeight = FontWeight.Bold) },
+    prefix = { Text(prefix, fontWeight = FontWeight.Bold) },
     supportingText = supporting?.let { { Text(it, style = MaterialTheme.typography.bodySmall) } },
     isError = isError,
     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
@@ -506,15 +508,16 @@ fun BrandFooter(modifier: Modifier = Modifier) {
     ) {
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         Spacer(Modifier.height(Space.md))
-        Text("Powered by Nageh Hosny", style = MaterialTheme.typography.labelMedium, color = TextMuted)
+        Text("Developed by Nageh Hosny", style = MaterialTheme.typography.labelMedium, color = TextMuted)
         Text(
-            "+971508984903",
+            "+971 50 898 4903",
             style = MaterialTheme.typography.labelLarge,
             color = Emerald,
             modifier = Modifier
                 .clickable { openWhatsAppNumber(context, "971508984903") }
                 .padding(vertical = 6.dp, horizontal = Space.sm)
         )
+        Text("Advance Medical · Private offline app", style = MaterialTheme.typography.bodySmall, color = TextMuted)
     }
 }
 

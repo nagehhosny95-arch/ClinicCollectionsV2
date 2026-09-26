@@ -56,8 +56,10 @@ import com.nageh.cliniccollections.ui.Emerald
 import com.nageh.cliniccollections.ui.EmeraldDeep
 import com.nageh.cliniccollections.ui.EmeraldSoft
 import com.nageh.cliniccollections.ui.HomeScreen
+import com.nageh.cliniccollections.ui.FilteredInvoicesScreen
 import com.nageh.cliniccollections.ui.InvoiceDetailScreen
 import com.nageh.cliniccollections.ui.InvoiceFormScreen
+import com.nageh.cliniccollections.ui.MonthReportScreen
 import com.nageh.cliniccollections.ui.ReportsScreen
 
 class MainActivity : ComponentActivity() {
@@ -72,7 +74,7 @@ class MainActivity : ComponentActivity() {
             // device language is Arabic.
             CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
                 ClinicTheme {
-                    Root(database.invoiceDao(), database.clinicDao())
+                    Root(database)
                 }
             }
         }
@@ -92,23 +94,27 @@ sealed interface Overlay {
     data class InvoiceForm(val id: Long? = null, val clinicId: Long? = null) : Overlay
     data class InvoiceDetail(val id: Long) : Overlay
     data class ClinicDetail(val id: Long) : Overlay
+    data class FilteredInvoices(val kind: DashboardListKind) : Overlay
+    data class MonthReport(val month: java.time.YearMonth) : Overlay
 }
 
 @Composable
-private fun Root(dao: InvoiceDao, clinicDao: ClinicDao) {
+private fun Root(database: AppDatabase) {
     var showSplash by remember { mutableStateOf(true) }
     Crossfade(targetState = showSplash, label = "splash") { splash ->
         if (splash) {
             BrandSplash { showSplash = false }
         } else {
-            App(dao, clinicDao)
+            App(database)
         }
     }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun App(dao: InvoiceDao, clinicDao: ClinicDao) {
+fun App(database: AppDatabase) {
+    val dao = database.invoiceDao()
+    val clinicDao = database.clinicDao()
     var tab by remember { mutableStateOf(Tab.Home) }
     val stack = remember { mutableStateListOf<Overlay>() }
 
@@ -149,6 +155,19 @@ fun App(dao: InvoiceDao, clinicDao: ClinicDao) {
                 onOpenInvoice = { stack.add(Overlay.InvoiceDetail(it)) },
                 onAddInvoice = { stack.add(Overlay.InvoiceForm(clinicId = top.id)) }
             )
+
+            is Overlay.FilteredInvoices -> FilteredInvoicesScreen(
+                dao = dao,
+                kind = top.kind,
+                onBack = { stack.removeAt(stack.lastIndex) },
+                onOpenInvoice = { stack.add(Overlay.InvoiceDetail(it)) }
+            )
+
+            is Overlay.MonthReport -> MonthReportScreen(
+                dao = dao,
+                month = top.month,
+                onBack = { stack.removeAt(stack.lastIndex) }
+            )
         }
         return
     }
@@ -159,9 +178,9 @@ fun App(dao: InvoiceDao, clinicDao: ClinicDao) {
                 title = {
                     Text(
                         when (tab) {
-                            Tab.Home -> "Clinic Collections"
+                            Tab.Home -> "Advance Medical"
                             Tab.Clinics -> "Clinic directory"
-                            Tab.Reports -> "Monthly report"
+                            Tab.Reports -> "Collection reports"
                             Tab.About -> "About"
                         }
                     )
@@ -205,12 +224,19 @@ fun App(dao: InvoiceDao, clinicDao: ClinicDao) {
         Box(Modifier.fillMaxSize().padding(top = padding.calculateTopPadding())) {
             val inner = PaddingValues(bottom = padding.calculateBottomPadding())
             when (tab) {
-                Tab.Home -> HomeScreen(dao, inner) { stack.add(Overlay.InvoiceDetail(it)) }
+                Tab.Home -> HomeScreen(
+                    dao = dao,
+                    contentPadding = inner,
+                    onOpenInvoice = { stack.add(Overlay.InvoiceDetail(it)) },
+                    onOpenDashboardList = { stack.add(Overlay.FilteredInvoices(it)) }
+                )
                 Tab.Clinics -> ClinicsScreen(clinicDao, dao, inner) {
                     stack.add(Overlay.ClinicDetail(it))
                 }
-                Tab.Reports -> ReportsScreen(dao, inner)
-                Tab.About -> AboutScreen(inner)
+                Tab.Reports -> ReportsScreen(dao, clinicDao, inner) {
+                    stack.add(Overlay.MonthReport(it))
+                }
+                Tab.About -> AboutScreen(database, inner)
             }
         }
     }

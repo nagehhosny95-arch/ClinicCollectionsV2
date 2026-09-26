@@ -110,6 +110,7 @@ fun InvoiceDetailScreen(
             item {
                 SectionCard("Invoice information", Icons.Default.ReceiptLong) {
                     InfoRow("Invoice number", row.invoiceNumber)
+                    InfoRow("Invoice Date", formatDate(row.invoiceDate))
                     InfoRow("Amount due", aed(row.dueAmountMinor))
                     InfoRow("Due date", formatDate(row.dueDate))
                 }

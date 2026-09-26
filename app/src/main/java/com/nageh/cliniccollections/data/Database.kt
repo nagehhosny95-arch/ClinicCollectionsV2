@@ -42,6 +42,7 @@ class Converters {
         Index(value = ["invoiceNumber"], unique = true),
         Index("dueDate"),
         Index("collectionDate"),
+        Index("invoiceDate"),
         Index("actualPaymentDate"),
         Index("clinicId")
     ]
@@ -53,6 +54,8 @@ data class InvoiceEntity(
     val whatsappNumber: String,
     val invoiceNumber: String,
     val dueAmountMinor: Long,
+    @ColumnInfo(defaultValue = "'1970-01-01'")
+    val invoiceDate: LocalDate = LocalDate.now(),
     val dueDate: LocalDate,
     @ColumnInfo(defaultValue = "'1970-01-01'") val collectionDate: LocalDate,
     val actualPaymentDate: LocalDate? = null,
@@ -112,6 +115,7 @@ interface InvoiceDao {
         SELECT * FROM invoices
         WHERE clinicName LIKE '%' || :q || '%' COLLATE NOCASE
            OR invoiceNumber LIKE '%' || :q || '%' COLLATE NOCASE
+           OR invoiceDate LIKE '%' || :q || '%'
            OR dueDate LIKE '%' || :q || '%'
            OR collectionDate LIKE '%' || :q || '%'
            OR actualPaymentDate LIKE '%' || :q || '%'
@@ -176,12 +180,42 @@ interface ClinicDao {
     suspend fun delete(clinic: ClinicEntity)
 }
 
-@Database(entities = [InvoiceEntity::class, ClinicEntity::class], version = 3, exportSchema = true)
+@Dao
+interface BackupDao {
+    @Query("SELECT * FROM clinics ORDER BY id")
+    suspend fun clinics(): List<ClinicEntity>
+
+    @Query("SELECT * FROM invoices ORDER BY id")
+    suspend fun invoices(): List<InvoiceEntity>
+
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    suspend fun insertClinics(items: List<ClinicEntity>)
+
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    suspend fun insertInvoices(items: List<InvoiceEntity>)
+
+    @Query("DELETE FROM invoices")
+    suspend fun deleteInvoices()
+
+    @Query("DELETE FROM clinics")
+    suspend fun deleteClinics()
+
+    @Transaction
+    suspend fun replaceAll(clinics: List<ClinicEntity>, invoices: List<InvoiceEntity>) {
+        deleteInvoices()
+        deleteClinics()
+        if (clinics.isNotEmpty()) insertClinics(clinics)
+        if (invoices.isNotEmpty()) insertInvoices(invoices)
+    }
+}
+
+@Database(entities = [InvoiceEntity::class, ClinicEntity::class], version = 4, exportSchema = true)
 @TypeConverters(Converters::class)
 abstract class AppDatabase : RoomDatabase() {
 
     abstract fun invoiceDao(): InvoiceDao
     abstract fun clinicDao(): ClinicDao
+    abstract fun backupDao(): BackupDao
 
     companion object {
         @Volatile private var INSTANCE: AppDatabase? = null
@@ -221,12 +255,32 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "ALTER TABLE invoices ADD COLUMN invoiceDate TEXT NOT NULL " +
+                        "DEFAULT '1970-01-01'"
+                )
+                db.execSQL(
+                    """UPDATE invoices
+                       SET invoiceDate = date(createdAtEpochMillis / 1000, 'unixepoch')
+                       WHERE invoiceDate = '1970-01-01'""".trimIndent()
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS index_invoices_invoiceDate " +
+                        "ON invoices(invoiceDate)"
+                )
+            }
+        }
+
         fun get(context: Context): AppDatabase = INSTANCE ?: synchronized(this) {
             INSTANCE ?: Room.databaseBuilder(
                 context.applicationContext,
                 AppDatabase::class.java,
                 "clinic_collections.db"
-            ).addMigrations(MIGRATION_1_2, MIGRATION_2_3).build().also { INSTANCE = it }
+            ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+                .build()
+                .also { INSTANCE = it }
         }
     }
 }

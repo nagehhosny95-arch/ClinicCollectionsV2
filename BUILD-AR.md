@@ -1,71 +1,43 @@
-# بناء ملف APK — دليل عملي
+# بناء واختبار Advance Medical Collections V5 على GitHub
 
-المشروع بعد الإصلاح جاهز للبناء بالكامل. أمامك طريقتان.
+## أول مرة
 
----
+1. ارفع **محتويات المشروع** إلى مستودع GitHub بحيث تكون الملفات `gradlew` و`app/`
+   و`.github/` في جذر المستودع.
+2. افتح **Actions → Test and build Android APK**. التشغيل يبدأ تلقائيًا بعد الرفع، أو اضغط
+   **Run workflow**.
+3. GitHub ينفذ:
+   - اختبارات الحسابات والفلاتر والنسخ الاحتياطي.
+   - Lint وبناء Debug APK.
+   - اختبار ترقية قاعدة البيانات 3 → 4 والاسترجاع على Android Emulator.
+4. بعد ظهور العلامة الخضراء، ستجد `advance-medical-debug` في **Artifacts**. هذه نسخة تجربة
+   فقط وليست النسخة الثابتة للتحديثات.
 
-## الطريقة الأولى: GitHub Actions (الأسهل — بدون تثبيت أي شيء)
+## إعداد APK ثابت يقبل التحديث بدون مسح البيانات
 
-سيبني السيرفر ملف `app-debug.apk` نيابةً عنك وتنزّله جاهزاً. مجاني للمستودعات العامة.
+أنشئ مفتاح Release مرة واحدة فقط، ثم أضف القيم الأربع التالية في:
+**Repository Settings → Secrets and variables → Actions**:
 
-1. افتح <https://github.com/new> وأنشئ مستودعاً جديداً باسم `ClinicCollections`.
-2. اضغط **uploading an existing file**، ثم اسحب **محتويات** مجلد `ClinicCollections`
-   (وليس المجلد نفسه). لازم تشوف `gradlew` و `settings.gradle.kts` و `app/`
-   و `.github/` في جذر المستودع مباشرةً.
+- `CLINIC_KEYSTORE_BASE64`
+- `CLINIC_STORE_PASSWORD`
+- `CLINIC_KEY_ALIAS`
+- `CLINIC_KEY_PASSWORD`
 
-   > مهم: تأكد أن `.github/workflows/build-apk.yml` مرفوع. GitHub أحياناً يخفي
-   > المجلدات التي تبدأ بنقطة أثناء السحب — إن لم يظهر، ارفعه يدوياً عبر
-   > **Add file → Create new file** بنفس المسار والاسم.
+التفاصيل وأمر إنشاء المفتاح موجودة في `RELEASE-AND-DATA-MIGRATION.md`. لا ترفع ملف المفتاح
+أو كلمات المرور داخل المشروع.
 
-3. اضغط **Commit changes**. سيبدأ البناء تلقائياً.
-4. افتح تبويب **Actions** → اختر آخر تشغيل باسم *Build Debug APK*.
-5. انتظر ٥ إلى ٨ دقائق حتى تظهر علامة ✅.
-6. انزل لأسفل الصفحة إلى قسم **Artifacts** → نزّل `app-debug`.
-7. فك الضغط عن الملف المنزَّل، ستجد بداخله `app-debug.apk`.
+بعد إضافة الأسرار شغّل Workflow يدويًا، واكتب:
 
-### التثبيت على الهاتف
-انقل الملف إلى الهاتف، افتحه، واسمح بـ **تثبيت من مصادر غير معروفة**
-عند الطلب. يعمل على Android 10 (API 29) فما فوق.
+- `version_code`: رقم أكبر من كل نسخة سابقة، مثل 5 ثم 6 ثم 7.
+- `version_name`: اسم ظاهر مثل `5.0.0` ثم `5.0.1`.
 
-### بعد التثبيت — إعدادان مهمان
-- **الإشعارات:** التطبيق سيطلب الإذن عند أول تشغيل على Android 13 فأحدث. اقبله.
-- **المنبهات الدقيقة:** الإعدادات ← التطبيقات ← Clinic Collections ←
-  المنبهات والتذكيرات ← تفعيل. بدونها ستصل التذكيرات لكن بدقة توقيت أقل.
+نزّل Artifact باسم `advance-medical-release-*`. هذا هو APK الذي تثبته وتستخدمه للتحديثات
+القادمة. كل نسخة مستقبلية يجب أن تستخدم نفس المفتاح وVersion Code أكبر.
 
----
+## مهم جدًا قبل استبدال النسخة القديمة
 
-## الطريقة الثانية: Android Studio على جهازك
+إذا كانت النسخة القديمة Debug وترفض التحديث، لا تمسحها مباشرة. اتبع قسم **One-time rescue
+from the old debug APK** في `RELEASE-AND-DATA-MIGRATION.md` لاستخراج البيانات وتحويلها إلى
+Backup، ثم استرجعها من **About → Restore backup** داخل V5.
 
-1. ثبّت أحدث نسخة مستقرة من Android Studio.
-2. **File → Open** واختر مجلد `ClinicCollections`.
-3. انتظر انتهاء Gradle Sync (سيحمّل Gradle 8.11.1 و SDK 35 تلقائياً — يحتاج إنترنت).
-4. **Build → Build Bundle(s) / APK(s) → Build APK(s)**.
-5. الملف الناتج في: `app/build/outputs/apk/debug/app-debug.apk`
-
-من الطرفية مباشرةً:
-
-```bash
-cd ClinicCollections
-./gradlew assembleDebug          # على ويندوز: gradlew.bat assembleDebug
-./gradlew testDebugUnitTest      # لتشغيل اختبارات منطق الحسابات
-```
-
----
-
-## نسخة موقّعة للنشر (لاحقاً)
-
-**Build → Generate Signed Bundle / APK → APK**، أنشئ keystore واحتفظ به في مكان آمن —
-هو نفسه المطلوب لكل تحديث مستقبلي. فقدانه يعني عدم قدرتك على تحديث التطبيق.
-
----
-
-## متطلبات البناء
-
-| العنصر | الإصدار |
-|---|---|
-| JDK | 17 |
-| Gradle | 8.11.1 (عبر الـ wrapper المرفق) |
-| Android Gradle Plugin | 8.7.3 |
-| Kotlin | 2.0.21 |
-| compileSdk / targetSdk | 35 |
-| minSdk | 29 (Android 10) |
+بعد تثبيت V5، أنشئ Backup من صفحة About قبل أي تحديث مهم أو تغيير هاتف.

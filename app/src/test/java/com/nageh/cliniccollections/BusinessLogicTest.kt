@@ -99,8 +99,10 @@ class BusinessLogicTest {
 
     @Test
     fun invoicePrefixIsAddedExactlyOnce() {
-        assertEquals("INV/2026/08/003", fullInvoiceNumber("08/003"))
-        assertEquals("INV/2026/08/003", fullInvoiceNumber("INV/2026/08/003"))
+        val date = LocalDate.of(2026, 8, 10)
+        assertEquals("INV/2026/", invoicePrefix(date))
+        assertEquals("INV/2026/08/003", fullInvoiceNumber(date, "08/003"))
+        assertEquals("INV/2026/08/003", fullInvoiceNumber(date, "INV/2026/08/003"))
         assertEquals("08/003", invoiceSuffix("INV/2026/08/003"))
         assertEquals(true, validInvoiceSuffix("08/003"))
         assertEquals(false, validInvoiceSuffix("8/3"))
@@ -219,7 +221,23 @@ class BusinessLogicTest {
         assertEquals(true, validInvoiceSuffix("08/33"))
         assertEquals(true, validInvoiceSuffix("08/003"))
         assertEquals(true, validInvoiceSuffix("08/1234"))
-        assertEquals("INV/2026/08/1234", fullInvoiceNumber("08/1234"))
+        assertEquals(
+            "INV/2026/08/1234",
+            fullInvoiceNumber(LocalDate.of(2026, 8, 10), "08/1234")
+        )
+    }
+
+    @Test
+    fun invoiceYearFollowsInvoiceDateIncludingBackdatedInvoices() {
+        assertEquals(
+            "INV/2027/01/7",
+            fullInvoiceNumber(LocalDate.of(2027, 1, 4), "01/7")
+        )
+        assertEquals(
+            "INV/2026/12/99",
+            fullInvoiceNumber(LocalDate.of(2026, 12, 20), "INV/2027/12/99")
+        )
+        assertEquals("12/99", invoiceSuffix("INV/2032/12/99"))
     }
 
     @Test

@@ -1,117 +1,48 @@
-# Clinic Collections (Android 10+)
+# Advance Medical Clinic Collections V5
 
-> Visual release: see `V3-VISUAL-CHANGES.md` for the icon, splash screen and UI changes. — v2
+Offline Android 10+ app for tracking clinic invoices, scheduled collections, actual cash
+collection, overdue balances, and payment timing. Data stays in a local Room database; the
+user can explicitly export and restore a JSON backup through Android's document picker.
 
-> **Build instructions:** see `BUILD-AR.md` (دليل البناء بالعربية).
-> **What was changed in this revision:** see `FIXES.md`.
-> The Gradle wrapper is now included, so `./gradlew assembleDebug` works without Android Studio.
+## V5 highlights
 
-An offline-only Kotlin/Jetpack Compose app for clinic invoice collections. Data remains in a local Room database; Android backup is disabled and there is no cloud sync or export feature.
+- Search and operational status filters at the top of Home.
+- Clickable Collection Due, Payment Overdue, and Collected This Month dashboards.
+- Invoice Date stored separately; invoice numbers use `INV/{invoiceDate.year}/` automatically.
+- Twelve-month yearly report: invoices issued, cash collected, and collection percentage.
+- Monthly percentage is cash collected in that month divided by invoices issued in that month;
+  it may exceed 100%. Annual percentage uses annual sums rather than averaging months.
+- Per-clinic payment history with invoice, planned collection, due, actual payment, and timing.
+- Backup/Restore in About, Room migration 3 → 4, and stable release-signing support.
+- Advance Medical user-facing branding with developer credit for Nageh Hosny.
 
-## Version 2 highlights
+## Financial rules
 
-- Fixed, non-editable invoice prefix `INV/2026/`; users enter a suffix such as `08/003`.
-- Separate Due Date and Collection Date with Material 3 date pickers.
-- Color-coded cards: green paid, orange collection today, red collection overdue, neutral upcoming.
-- Collection-date reminders one day before and on the agreed collection date.
-- Add, edit, delete with confirmation, dashboard summary, upgraded reports, About page, and branding footer.
-- Room migration `1 → 2` adds `collectionDate`, copies every existing record's `dueDate` into it, and preserves all existing data.
+All AED values are integer fils (`Long`). An invoice belongs to an issue month using
+`invoiceDate`. Cash belongs to a collection month using `actualPaymentDate`, regardless of when
+the invoice was issued. A month with no issued invoices displays `N/A` for its percentage while
+retaining cash collected. Collected amounts are capped at the invoice amount for reporting.
 
-## 1. Implementation and APK steps
+## Build and verification
 
-1. Install the current stable Android Studio and Android SDK 35.
-2. Open the `ClinicCollections` folder and allow Gradle sync to complete (JDK 17).
-3. Run on an API 29+ emulator/device. On Android 13+, grant notification permission. On Android 12+, exact-alarm permission may be granted in **Settings > Apps > Special app access > Alarms & reminders**; the app uses an inexact idle-safe fallback if exact permission is unavailable.
-4. Add an invoice and confirm it appears in the list. Dates use ISO format `YYYY-MM-DD`; WhatsApp numbers use international format without `+`, for example `971501234567`.
-5. Test a reminder by temporarily changing `HOUR` in `ReminderScheduler` and using a near date, or with `adb shell am broadcast -n com.nageh.cliniccollections/.reminders.ReminderReceiver --el invoice_id 1 --ei offset 0` after record 1 exists.
-6. Run tests from Android Studio or `./gradlew testDebugUnitTest`. The wrapper is committed, so no extra setup is needed.
-7. Debug APK: **Build > Build Bundle(s) / APK(s) > Build APK(s)**. Output: `app/build/outputs/apk/debug/app-debug.apk`.
-8. Signed release APK: **Build > Generate Signed Bundle / APK > APK**, create/select a keystore, select `release`, and finish. Keep the keystore private; it is required for future updates.
+GitHub Actions runs JVM unit tests, lint, a debug APK build, and Room migration/restore tests on
+an Android emulator. With the four signing secrets configured, it also creates a signed release
+APK suitable for future in-place updates. See [BUILD-AR.md](BUILD-AR.md) for the Arabic steps and
+[RELEASE-AND-DATA-MIGRATION.md](RELEASE-AND-DATA-MIGRATION.md) before replacing the old debug app.
 
-## 2. Room schema
+Local commands, when Gradle and Android SDK dependencies are available:
 
-Table: `invoices` (one row per invoice; no relationship is necessary because a record contains its clinic snapshot).
-
-| Field | Kotlin type | SQLite type | Meaning |
-|---|---|---|---|
-| `id` | `Long` | INTEGER PK | Auto-generated record ID |
-| `clinicName` | `String` | TEXT | Clinic name, indexed |
-| `whatsappNumber` | `String` | TEXT | International digits only |
-| `invoiceNumber` | `String` | TEXT UNIQUE | Invoice reference, indexed |
-| `dueAmountMinor` | `Long` | INTEGER | Due amount in fils; avoids floating-point errors |
-| `dueDate` | `LocalDate` | TEXT | Official invoice due date (`YYYY-MM-DD`), indexed |
-| `collectionDate` | `LocalDate` | TEXT | Agreed follow-up/PDC collection date, indexed |
-| `actualPaymentDate` | `LocalDate?` | TEXT NULL | Date specified by clinic accountant, indexed |
-| `collectedAmountMinor` | `Long` | INTEGER | Amount actually collected in fils |
-| `paymentTerm` | `PaymentTerm` | TEXT | `IMMEDIATE`, `ONE_WEEK`, `ONE_MONTH`, `TWO_MONTHS`, `CUSTOM` |
-| `customTermDays` | `Int?` | INTEGER NULL | Optional custom number of days |
-| `manualStatus` | `PaymentStatus?` | TEXT NULL | Override: `PENDING`, `PAID`, `OVERDUE`; null means automatic |
-| `createdAtEpochMillis` | `Long` | INTEGER | Creation timestamp |
-
-`Converters` maps `LocalDate` and enums to stable ISO/name strings. Schema JSON is generated by Room under the build output because `exportSchema=true`.
-
-## 3. Notification logic
-
-`ReminderScheduler.schedule()` creates two unique alarms for each invoice using Collection Date:
-
-- Collection date minus one day at 09:00 local time.
-- Collection date at 09:00 local time.
-
-It uses `setExactAndAllowWhileIdle` when exact alarms are authorized, otherwise `setAndAllowWhileIdle`. `ReminderReceiver` loads the latest record from Room and suppresses notifications already marked paid. The notification body is:
-
-`Clinic name • AED amount • Invoice number • Due date • Payment: actual date/Not collected`
-
-`BootReceiver` restores all unpaid future alarms after reboot or app replacement. Editing a date should cancel and reschedule using the same record ID; marking paid cancels both alarms.
-
-## 4. WhatsApp deep link
-
-The implementation is in `openWhatsApp`:
-
-```kotlin
-val message = "Dear ${invoice.clinicName}, this is a friendly payment reminder " +
-    "for AED ${money(invoice.dueAmountMinor)} against invoice ${invoice.invoiceNumber}, " +
-    "due on ${invoice.dueDate}. Thank you."
-val encoded = URLEncoder.encode(message, StandardCharsets.UTF_8.toString())
-val uri = Uri.parse("https://wa.me/${normalizePhone(invoice.whatsappNumber)}?text=$encoded")
-context.startActivity(Intent(Intent.ACTION_VIEW, uri))
+```bash
+./gradlew testDebugUnitTest lintDebug assembleDebug
+./gradlew connectedDebugAndroidTest
 ```
 
-## 5. Status and monthly reports
+## Platform
 
-Automatic status precedence:
+- Kotlin 2.0.21, Compose Material 3, Room 2.6.1
+- JDK 17, Gradle 8.11.1, Android Gradle Plugin 8.7.3
+- minSdk 29, compileSdk/targetSdk 35
+- Application ID: `com.nageh.cliniccollections`
 
-1. Use `manualStatus` when non-null.
-2. `PAID` when `actualPaymentDate != null` or the collected amount covers the due amount.
-3. `OVERDUE` when the due date is before today.
-4. Otherwise `PENDING`.
-
-Monthly membership is based on `dueDate` (`monthStart <= dueDate < nextMonthStart`). Totals:
-
-- Due = sum of `dueAmountMinor`.
-- Collected = sum of collected amounts, capped at each due amount.
-- Outstanding = sum of `max(due - collected, 0)`.
-- Overdue = outstanding balance only for rows whose effective status is `OVERDUE`.
-
-The pure `report()` function is unit tested, making financial behavior deterministic.
-
-## 6. Search approach
-
-The Room query searches `clinicName`, `invoiceNumber`, `dueDate`, and `actualPaymentDate` and caps the result at 1,000. Clinic, invoice, and date columns are indexed. For the required maximum dataset of 1,000 rows, a parameterized `LIKE` query is simple and reliably sub-second on API 29 hardware. If the database later grows into tens of thousands of invoices, migrate to a Room FTS4 virtual table for clinic/invoice text while keeping date indexes in the ordinary table. The UI changes query flows immediately and Room performs work off the main thread.
-
-## 7. Acceptance criteria
-
-- [ ] APK installs and launches on Android 10 / API 29 and every newer supported API.
-- [ ] Adding a valid invoice persists it after process death and device restart.
-- [ ] One-day-before and same-day reminders show the clinic, due amount, invoice number, due date, and payment date, whether the app is open or closed.
-- [ ] Booting the phone reschedules unpaid reminders.
-- [ ] Paid, pending, overdue, and manual override behavior follows the precedence above.
-- [ ] Searching any clinic name, invoice number, due date, or actual payment date returns relevant results within one second with 1,000 stored rows.
-- [ ] Monthly due, collected, outstanding, and overdue totals match hand-calculated fixtures, including partial collections.
-- [ ] Tapping WhatsApp opens the correct contact and pre-fills a reminder containing the exact amount and invoice number.
-- [ ] Android backup is disabled; no cloud sync, backup, Excel export, or text export is present.
-
-## Production notes
-
-- The current form stores the manually selected payment term and manually entered due date. This intentionally supports exceptions rather than forcing the term to calculate the date.
-- Currency is stored as integer fils. Never replace it with `Double` in the database.
-- For release QA, test alarms on at least one Android 10 device and one Android 13+ device, including Doze/reboot and notification-permission scenarios.
+Reminder alarms are scheduled at 10:30 local time one day before and on the planned Collection
+Date. Paid invoices cancel their alarms; reboot and app replacement reschedule open invoices.

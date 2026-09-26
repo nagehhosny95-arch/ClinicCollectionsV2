@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -26,6 +27,7 @@ import androidx.compose.material.icons.filled.TrendingUp
 import androidx.compose.material.icons.filled.WarningAmber
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -41,11 +43,14 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.nageh.cliniccollections.R
+import com.nageh.cliniccollections.DashboardListKind
+import com.nageh.cliniccollections.InvoiceFilter
 import com.nageh.cliniccollections.aed
 import com.nageh.cliniccollections.collectedInMonth
 import com.nageh.cliniccollections.dashboardCounts
 import com.nageh.cliniccollections.data.InvoiceDao
 import com.nageh.cliniccollections.formatMonth
+import com.nageh.cliniccollections.filterInvoices
 import com.nageh.cliniccollections.normalizeSearchQuery
 import com.nageh.cliniccollections.report
 import java.time.LocalDate
@@ -55,9 +60,11 @@ import java.time.YearMonth
 fun HomeScreen(
     dao: InvoiceDao,
     contentPadding: PaddingValues,
-    onOpenInvoice: (Long) -> Unit
+    onOpenInvoice: (Long) -> Unit,
+    onOpenDashboardList: (DashboardListKind) -> Unit
 ) {
     var query by remember { mutableStateOf("") }
+    var selectedFilter by remember { mutableStateOf(InvoiceFilter.ALL) }
     val searchFlow = remember(query) {
         if (query.isBlank()) dao.observeAll() else dao.search(normalizeSearchQuery(query))
     }
@@ -71,6 +78,9 @@ fun HomeScreen(
     // collection date or the due date.
     val currentMonth = remember { YearMonth.now() }
     val collectedThisMonth = remember(all, currentMonth) { collectedInMonth(all, currentMonth) }
+    val visibleRows = remember(rows, selectedFilter, today) {
+        filterInvoices(rows, selectedFilter, today)
+    }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -83,6 +93,35 @@ fun HomeScreen(
         verticalArrangement = Arrangement.spacedBy(Space.md)
     ) {
         item { BrandedHeader(invoiceCount = all.size) }
+
+        item {
+            OutlinedTextField(
+                value = query,
+                onValueChange = { query = it },
+                modifier = Modifier.fillMaxWidth(),
+                placeholder = { Text("Search clinic, invoice or date") },
+                leadingIcon = { Icon(Icons.Default.Search, null) },
+                trailingIcon = {
+                    if (query.isNotEmpty()) {
+                        IconButton(onClick = { query = "" }) { Icon(Icons.Default.Close, "Clear") }
+                    }
+                },
+                singleLine = true,
+                shape = MaterialTheme.shapes.large
+            )
+        }
+
+        item {
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(Space.sm)) {
+                items(InvoiceFilter.entries) { filter ->
+                    FilterChip(
+                        selected = selectedFilter == filter,
+                        onClick = { selectedFilter = filter },
+                        label = { Text(filter.label()) }
+                    )
+                }
+            }
+        }
 
         item {
             SummaryCard(
@@ -108,7 +147,8 @@ fun HomeScreen(
                     Icons.Default.TrendingUp,
                     Modifier.weight(1f),
                     accent = OkGreen,
-                    tint = OkSoft
+                    tint = OkSoft,
+                    onClick = { onOpenDashboardList(DashboardListKind.COLLECTED_THIS_MONTH) }
                 )
             }
         }
@@ -121,7 +161,8 @@ fun HomeScreen(
                     Icons.Default.EventAvailable,
                     Modifier.weight(1f),
                     accent = WarnOrange,
-                    tint = WarnSoft
+                    tint = WarnSoft,
+                    onClick = { onOpenDashboardList(DashboardListKind.COLLECTION_DUE) }
                 )
                 SummaryCard(
                     "Payment overdue",
@@ -129,34 +170,17 @@ fun HomeScreen(
                     Icons.Default.WarningAmber,
                     Modifier.weight(1f),
                     accent = DangerRed,
-                    tint = DangerSoft
+                    tint = DangerSoft,
+                    onClick = { onOpenDashboardList(DashboardListKind.PAYMENT_OVERDUE) }
                 )
             }
         }
 
         item {
-            Spacer(Modifier.height(Space.xs))
-            OutlinedTextField(
-                value = query,
-                onValueChange = { query = it },
-                modifier = Modifier.fillMaxWidth(),
-                placeholder = { Text("Search clinic, invoice or date") },
-                leadingIcon = { Icon(Icons.Default.Search, null) },
-                trailingIcon = {
-                    if (query.isNotEmpty()) {
-                        IconButton(onClick = { query = "" }) { Icon(Icons.Default.Close, "Clear") }
-                    }
-                },
-                singleLine = true,
-                shape = MaterialTheme.shapes.large
-            )
+            SectionLabel(if (query.isBlank()) "Invoices (${visibleRows.size})" else "Results (${visibleRows.size})")
         }
 
-        item {
-            SectionLabel(if (query.isBlank()) "All invoices (${rows.size})" else "Results (${rows.size})")
-        }
-
-        if (rows.isEmpty()) {
+        if (visibleRows.isEmpty()) {
             item {
                 EmptyState(
                     title = if (query.isBlank()) "No invoices yet" else "No matching invoices",
@@ -168,11 +192,19 @@ fun HomeScreen(
                 )
             }
         } else {
-            items(rows, key = { it.id }) { invoice ->
+            items(visibleRows, key = { it.id }) { invoice ->
                 InvoiceCard(invoice, today = today) { onOpenInvoice(invoice.id) }
             }
         }
     }
+}
+
+private fun InvoiceFilter.label(): String = when (this) {
+    InvoiceFilter.ALL -> "All"
+    InvoiceFilter.ON_TRACK -> "On Track"
+    InvoiceFilter.COLLECTION_DUE -> "Collection Due"
+    InvoiceFilter.PAYMENT_OVERDUE -> "Payment Overdue"
+    InvoiceFilter.PAID -> "Paid"
 }
 
 /** Clean branded header: logo mark, greeting, and the current month. */
@@ -195,7 +227,7 @@ private fun BrandedHeader(invoiceCount: Int) {
         }
         Spacer(Modifier.width(Space.md))
         Column(Modifier.weight(1f)) {
-            Text("Clinic Collections", style = MaterialTheme.typography.titleLarge, color = EmeraldDeep)
+            Text("Advance Medical", style = MaterialTheme.typography.titleLarge, color = EmeraldDeep)
             Text(
                 "$invoiceCount invoice${if (invoiceCount == 1) "" else "s"} tracked",
                 style = MaterialTheme.typography.bodySmall,

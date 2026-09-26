@@ -43,6 +43,10 @@ object ReminderScheduler {
         OFFSETS.forEach { scheduleOne(context, item, it) }
     }
 
+    fun rescheduleAll(context: Context, invoices: List<InvoiceEntity>) {
+        invoices.forEach { schedule(context, it) }
+    }
+
     private fun scheduleOne(context: Context, item: InvoiceEntity, offset: Int) {
         val triggerAt = item.collectionDate
             .plusDays(offset.toLong())

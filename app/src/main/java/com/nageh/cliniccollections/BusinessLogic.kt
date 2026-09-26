@@ -29,11 +29,14 @@ fun report(rows: List<InvoiceEntity>, today: LocalDate = LocalDate.now()): Month
     )
 }
 
-const val INVOICE_PREFIX = "INV/2026/"
+private val INVOICE_PREFIX_PATTERN = Regex("^INV/\\d{4}/")
 
-fun invoiceSuffix(value: String): String = value.trim().removePrefix(INVOICE_PREFIX)
+fun invoicePrefix(invoiceDate: LocalDate): String = "INV/${invoiceDate.year}/"
 
-fun fullInvoiceNumber(value: String): String = INVOICE_PREFIX + invoiceSuffix(value)
+fun invoiceSuffix(value: String): String = value.trim().replaceFirst(INVOICE_PREFIX_PATTERN, "")
+
+fun fullInvoiceNumber(invoiceDate: LocalDate, value: String): String =
+    invoicePrefix(invoiceDate) + invoiceSuffix(value)
 
 fun validInvoiceSuffix(value: String): Boolean =
     Regex("^(0[1-9]|1[0-2])/\\d{1,4}$").matches(invoiceSuffix(value))

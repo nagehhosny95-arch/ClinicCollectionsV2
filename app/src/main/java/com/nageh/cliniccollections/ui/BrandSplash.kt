@@ -56,7 +56,7 @@ fun BrandSplash(onFinished: () -> Unit) {
             }
             Box(Modifier.height(28.dp))
             Text(
-                "Clinic Collections",
+                "Advance Medical",
                 style = MaterialTheme.typography.headlineSmall,
                 color = Color.White
             )

@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">Clinic Collections</string>
+    <string name="app_name">Advance Medical Collections</string>
     <string name="app_tagline">Smart Payment Tracking</string>
     <string name="notification_channel_name">Payment reminders</string>
     <string name="notification_channel_description">High priority reminders with sound and vibration at 10:30, one day before and on the invoice collection date.</string>

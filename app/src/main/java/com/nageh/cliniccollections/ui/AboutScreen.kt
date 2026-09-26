@@ -1,5 +1,9 @@
 package com.nageh.cliniccollections.ui
 
+import android.net.Uri
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -18,21 +22,53 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.EventAvailable
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Palette
+import androidx.compose.material.icons.filled.Save
+import androidx.compose.material.icons.filled.Restore
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import com.nageh.cliniccollections.INVOICE_PREFIX
+import com.nageh.cliniccollections.BuildConfig
 import com.nageh.cliniccollections.R
+import com.nageh.cliniccollections.backup.BackupRepository
+import com.nageh.cliniccollections.data.AppDatabase
+import com.nageh.cliniccollections.reminders.ReminderScheduler
+import kotlinx.coroutines.launch
+import java.time.LocalDate
 
 @Composable
-fun AboutScreen(contentPadding: PaddingValues) {
+fun AboutScreen(database: AppDatabase, contentPadding: PaddingValues) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val repository = remember(database, context) { BackupRepository(context, database) }
+    var restoreUri by remember { mutableStateOf<Uri?>(null) }
+    val exportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/json")
+    ) { uri ->
+        if (uri != null) scope.launch {
+            runCatching { repository.export(uri) }
+                .onSuccess { Toast.makeText(context, "Backup saved", Toast.LENGTH_LONG).show() }
+                .onFailure { Toast.makeText(context, "Backup failed: ${it.message}", Toast.LENGTH_LONG).show() }
+        }
+    }
+    val importLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri -> restoreUri = uri }
+
     Column(
         Modifier
             .fillMaxSize()
@@ -57,9 +93,9 @@ fun AboutScreen(contentPadding: PaddingValues) {
                 modifier = Modifier.size(60.dp)
             )
         }
-        Text("Clinic Collections", style = MaterialTheme.typography.headlineSmall, color = EmeraldDeep)
+        Text("Advance Medical", style = MaterialTheme.typography.headlineSmall, color = EmeraldDeep)
         Text(
-            "Smart Payment Tracking",
+            "Clinic Collections · V${BuildConfig.VERSION_NAME}",
             style = MaterialTheme.typography.bodyMedium,
             color = TextMuted
         )
@@ -67,16 +103,37 @@ fun AboutScreen(contentPadding: PaddingValues) {
 
         SectionCard("About this app", Icons.Default.Info) {
             Text(
-                "An offline collection tracker for clinic invoices. Everything is stored " +
-                    "in a local database on this device: there is no cloud sync, no backup " +
-                    "and no export.",
+                "A private, offline collection tracker for Advance Medical. Data stays " +
+                    "on this device unless you explicitly create a backup file.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = TextMuted
             )
-            InfoRow("Invoice prefix", INVOICE_PREFIX)
+            InfoRow("Invoice prefix", "INV/[invoice year]/")
             InfoRow("Date format", "DD/MM/YYYY")
             InfoRow("Reminders", "10:30, day before and on the day")
-            InfoRow("Minimum Android", "Android 10 (API 29)")
+        }
+
+        SectionCard("Backup and restore", Icons.Default.Save) {
+            Text(
+                "Save a backup before installing an update or changing phones. Restore replaces " +
+                    "the current clinics and invoices with the selected backup.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = TextMuted
+            )
+            PrimaryButton(
+                text = "Create backup",
+                icon = Icons.Default.Save,
+                onClick = {
+                    exportLauncher.launch("clinic-collections-${LocalDate.now()}.json")
+                },
+                modifier = Modifier.fillMaxWidth()
+            )
+            SecondaryButton(
+                text = "Restore backup",
+                icon = Icons.Default.Restore,
+                onClick = { importLauncher.launch(arrayOf("application/json", "text/plain")) },
+                modifier = Modifier.fillMaxWidth()
+            )
         }
 
         SectionCard("What the card colours mean", Icons.Default.Palette) {
@@ -107,6 +164,31 @@ fun AboutScreen(contentPadding: PaddingValues) {
         }
 
         BrandFooter()
+    }
+
+    val selectedRestore = restoreUri
+    if (selectedRestore != null) {
+        AlertDialog(
+            onDismissRequest = { restoreUri = null },
+            title = { Text("Replace current data?") },
+            text = { Text("Restore will replace every clinic and invoice currently saved on this phone.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    restoreUri = null
+                    scope.launch {
+                        runCatching { repository.import(selectedRestore) }
+                            .onSuccess { snapshot ->
+                                ReminderScheduler.rescheduleAll(context, snapshot.invoices)
+                                Toast.makeText(context, "Backup restored", Toast.LENGTH_LONG).show()
+                            }
+                            .onFailure {
+                                Toast.makeText(context, "Restore failed: ${it.message}", Toast.LENGTH_LONG).show()
+                            }
+                    }
+                }) { Text("Restore") }
+            },
+            dismissButton = { TextButton(onClick = { restoreUri = null }) { Text("Cancel") } }
+        )
     }
 }
 
